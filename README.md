@@ -197,6 +197,27 @@ text:
 - **big_endian** — defaults to **true**. If colors look wrong (swapped/tinted), set `big_endian: false` for panels that require little-endian RGB565.
 - **Red tile / red screen** — this indicates a tile payload exceeded `max_bytes_per_msg`. Increase `max_bytes_per_msg` or reduce tile size/JPEG quality so each tile fits.
 
+## Browser test client (WIP)
+
+This repository now includes a browser-based test client in [web_client](web_client) for quicker development loops without reflashing ESP devices.
+
+### Current features
+
+- WebSocket connection with reconnect and keepalive.
+- Binary protocol compatibility for **Frame**, **Touch**, **OpenURL**, and **Keepalive** packets.
+- JPEG tile rendering to HTML5 canvas.
+- Pointer/touch forwarding (`down/move/up`) with move coalescing.
+
+### Run locally
+
+```bash
+cd web_client
+npm install
+npm run dev
+```
+
+Open the local Vite URL in your browser, set server/display params, click **Connect**, then use **Send open_url** for navigation tests.
+
 ## No on-screen keyboard
 
 There’s no on-screen keyboard; you’ll need to [use Chrome DevTools](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) for any required input.
