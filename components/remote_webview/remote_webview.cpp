@@ -19,6 +19,50 @@ namespace remote_webview {
 static const char *const TAG = "Remote_WebView";
 RemoteWebView *RemoteWebView::self_ = nullptr;
 
+//Below two functions are part of automation template testing
+void RemoteWebView::add_on_frame_update_callback(std::function<void()> &&callback) {
+  this->on_frame_update_callback_.add(std::move(callback));
+}
+void RemoteWebView::trigger_on_frame_update() {
+  uint32_t now = millis();
+  
+  // Check if 1000 milliseconds (1 second) has passed since the last trigger
+  if (now - this->last_trigger_ms_ < 1000) {
+    return; // Exit early without triggering the automation
+  }
+  
+  this->last_trigger_ms_ = now; // Update the tracking variable
+  
+  ESP_LOGD(TAG, "Triggering the on_frame_update automation");
+  this->on_frame_update_callback_.call();
+}
+
+// This is the display current URL processor main function to decode the packet and do things:
+void RemoteWebView::process_current_url_packet_(const uint8_t *data, size_t len) {
+  if (!data || len < sizeof(proto::CurrentURLHeader)) return;
+  
+  auto *hdr = reinterpret_cast<const proto::CurrentURLHeader *>(data);
+  if (sizeof(proto::CurrentURLHeader) + hdr->url_len > len) return; // Malformed packet bounds check
+  
+  if (this->url_sensor_ != nullptr) {
+    // Extract the string using the length provided
+    std::string url(reinterpret_cast<const char*>(data + sizeof(proto::CurrentURLHeader)), hdr->url_len);
+    
+    // Publish it to ESPHome so automations can use it
+    this->url_sensor_->publish_state(url);
+    ESP_LOGD(TAG, "Current Server URL updated: %s", url.c_str());
+  }
+}
+
+// This function exposes the current URL from server to lambda functions
+std::string RemoteWebView::get_current_url() const {
+  // Check if the sensor was configured in YAML and has received a value
+  if (this->url_sensor_ != nullptr && this->url_sensor_->has_state()) {
+    return this->url_sensor_->state;
+  }
+  return ""; // Return an empty string if there is no URL yet
+}
+
 static inline void websocket_force_reconnect(esp_websocket_client_handle_t client) {
   if (!client) return;
   esp_websocket_client_stop(client);
@@ -301,6 +345,9 @@ void RemoteWebView::process_packet_(void * /*client*/, const uint8_t *data, size
     case proto::MsgType::FrameStats:
       process_frame_stats_packet_(data, len);
       break;
+    case proto::MsgType::CurrentURL: // deal with packet #6 here - aka our current display URL packet
+      process_current_url_packet_(data, len);
+      break;
     default:
       ESP_LOGW(TAG, "unknown packet type: %d", (int)type);
       break;
@@ -347,6 +394,9 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
     frame_stats_time_ += time_ms;
     frame_stats_count_++;
     ESP_LOGD(TAG, "frame %lu: tiles %u (%u bytes) - %lu ms", frame_id_, frame_tiles_, frame_bytes_, time_ms);
+
+    // LCD screen has had an update, lets trigger the automation
+    trigger_on_frame_update();
   }
 }
 
