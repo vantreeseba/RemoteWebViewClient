@@ -151,6 +151,16 @@ remote_webview:
   full_frame_tile_count: 1
   max_bytes_per_msg: 61440
   jpeg_quality: 85
+  # Optional: Trigger an automation when the display updates (Rate-limited to 1 per second)
+  on_frame_update:
+    - logger.log: "The display just received a frame update!"
+  # Optional: Expose the browser's current URL to Home Assistant/ESPHome
+  current_url_displayed:
+    name: "Remote Display Current URL"
+    on_value:
+      - logger.log:
+          format: "Navigated to: %s"
+          args: [ 'x.c_str()' ]
 
 text:
   - platform: template
@@ -188,6 +198,9 @@ text:
 | `max_bytes_per_msg`     | int (B)   | ❌       | `14336` or `61440`                | Upper bound for a single WS binary message. |
 | `big_endian`            | bool      | ❌       | `true` or `false`                 | Use big-endian RGB565 pixel order for JPEG output (set false for little-endian panels). Default is `true`. |
 | `rotation`              | int       | ❌       | 0, 90, 180, 270                   | Enables software rotation for both the display and touchscreen. |
+| `on_frame_update`       | action    | ❌       | `- logger.log: "The display just received a frame update!"`  | Action that gets triggered each time the display updates (maximum of 1 trigger per second) |
+| `current_url_displayed` | text_sensor | ❌      | `name: "Current URL"`            | Exposes the URL currently loaded in the server's headless browser as an ESPHome Text Sensor. Supports on_value automations. |
+
 
 ## Recommendations
 
@@ -198,6 +211,16 @@ text:
 - **jpeg_quality** — lower values encode faster and reduce bandwidth (but increase artifacts). Start at **85**, drop toward **70–75** if you need speed.
 - **big_endian** — defaults to **true**. If colors look wrong (swapped/tinted), set `big_endian: false` for panels that require little-endian RGB565.
 - **Red tile / red screen** — this indicates a tile payload exceeded `max_bytes_per_msg`. Increase `max_bytes_per_msg` or reduce tile size/JPEG quality so each tile fits.
+
+## On-screen keyboard
+
+There is a Javascript based on-screen keyboard with the Latin/English alphabet. Simply click into input elements that allow Keyboard inputs and the Javascript keyboard should pop up.
+
+<img src="images/osk-1.png" height="250px"><img src="images/osk-2.png" height="250px"><img src="images/osk-3.png" height="250px">
+
+## No on-screen keyboard
+
+If this on-screen keyboard is misbehaving, you’ll need to [use Chrome DevTools](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) for any required input.
 
 ## Browser test client (WIP)
 
@@ -219,7 +242,3 @@ npm run dev
 ```
 
 Open the local Vite URL in your browser, set server/display params, click **Connect**, then use **Send open_url** for navigation tests.
-
-## No on-screen keyboard
-
-There’s no on-screen keyboard; you’ll need to [use Chrome DevTools](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) for any required input.

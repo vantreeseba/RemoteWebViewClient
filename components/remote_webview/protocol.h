@@ -9,7 +9,7 @@ constexpr uint8_t kProtocolVersion = 1;
 constexpr uint8_t kFlafLastOfFrame = 1u<<0;
 constexpr uint8_t kFlagIsFullFrame = 1u<<1;
 
-enum class MsgType   : uint8_t { Unknown = 0, Frame = 1, Touch = 2, FrameStats = 3, OpenURL = 4, Keepalive = 5 };
+enum class MsgType   : uint8_t { Unknown = 0, Frame = 1, Touch = 2, FrameStats = 3, OpenURL = 4, Keepalive = 5, CurrentURL = 6 };
 enum class Encoding  : uint8_t { Unknown = 0, PNG = 1, JPEG = 2, RAW565 = 3, RAW565_RLE = 4, RAW565_LZ4 = 5 };
 enum class TouchType : uint8_t { Unknown = 0, Down = 1, Move = 2, Up = 3 };
 
@@ -57,6 +57,14 @@ struct RWV_PACKED OpenURLHeader {
   uint32_t url_len;
 };
 static_assert(sizeof(OpenURLHeader) == 8, "OpenURLHeader wire size must be 8");
+
+// [type:1][ver:1][url_len:4] => 6 bytes -- This is the Current URL the display is showing
+struct RWV_PACKED CurrentURLHeader {
+  MsgType type;
+  uint8_t ver;
+  uint32_t url_len;
+};
+static_assert(sizeof(CurrentURLHeader) == 6, "CurrentURLHeader wire size must be 6");
 
 // [type:1][ver:1][time:4][count:4] => 10 bytes
 struct RWV_PACKED FrameStatsPacket {

@@ -2,6 +2,8 @@
 #include "esphome/core/component.h"
 #include "esphome/components/display/display.h"
 #include "esphome/components/touchscreen/touchscreen.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/core/helpers.h"
 #include "JPEGDEC.h"
 #include "protocol.h"
 #include "remote_webview_config.h"
@@ -53,6 +55,16 @@ class RemoteWebView : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
+  // Automation on_update_frame things
+  void add_on_frame_update_callback(std::function<void()> &&callback);
+  void trigger_on_frame_update();
+
+  // Current URL display is showing processor function
+  void set_url_sensor(text_sensor::TextSensor *s) { url_sensor_ = s; }
+
+  // Expose a lambda function to check current URL shown in server
+  std::string get_current_url() const;
+
  private:
   struct WsMsg {
     uint8_t *buf{nullptr};
@@ -63,6 +75,15 @@ class RemoteWebView : public Component {
     uint8_t *buf{nullptr};
     size_t total{0}, filled{0};
   };
+
+  // Automation on_update_frame things
+  CallbackManager<void()> on_frame_update_callback_{};
+  // Adding a way to track last activation time to rate limit the on_frame_update call in the main ESP32 cpp loop
+  uint32_t last_trigger_ms_{0};
+
+  // Current URL processor function
+  text_sensor::TextSensor *url_sensor_{nullptr};
+  void process_current_url_packet_(const uint8_t *data, size_t len);
 
   static constexpr bool     kCoalesceMoves  = cfg::coalesce_moves;
   static constexpr uint32_t kMoveRateHz     = cfg::move_rate_hz;
