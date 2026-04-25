@@ -144,6 +144,18 @@ button.ghost:hover {
   margin-left: auto;
 }
 
+.current-url-display {
+  padding: 8px 10px;
+  background: #0f1620;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+  word-break: break-all;
+  white-space: normal;
+}
+
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;

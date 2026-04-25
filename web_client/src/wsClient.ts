@@ -7,6 +7,7 @@ import {
   FLAG_LAST_OF_FRAME,
   MsgType,
   parseFramePacket,
+  parseCurrentURLPacket,
   QueryOptions,
   TouchType
 } from "./protocol";
@@ -25,6 +26,7 @@ type Metrics = {
 
 type Handlers = {
   onMetrics: (metrics: Metrics) => void;
+  onURL: (url: string) => void;
 };
 
 export class RemoteWebViewBrowserClient {
@@ -226,6 +228,17 @@ export class RemoteWebViewBrowserClient {
 
     if (type === MsgType.FrameStats) {
       this.pushMetrics("connected");
+      return;
+    }
+
+    if (type === MsgType.CurrentURL) {
+      const parsed = parseCurrentURLPacket(buffer);
+      if (!parsed) {
+        this.lastError = "bad current URL packet";
+        this.pushMetrics("warning");
+        return;
+      }
+      this.handlers.onURL(parsed.url);
       return;
     }
 

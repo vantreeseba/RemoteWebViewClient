@@ -7,7 +7,8 @@ export enum MsgType {
   Touch = 2,
   FrameStats = 3,
   OpenURL = 4,
-  Keepalive = 5
+  Keepalive = 5,
+  CurrentURL = 6
 }
 
 export enum Encoding {
@@ -62,8 +63,13 @@ export type ParsedFrame = {
   tiles: TileInfo[];
 };
 
+export type CurrentURLPacket = {
+  url: string;
+};
+
 const FRAME_HEADER_SIZE = 11;
 const TILE_HEADER_SIZE = 12;
+const CURRENT_URL_HEADER_SIZE = 6;
 
 export function buildWsUri(server: string, opts: QueryOptions): string {
   const serverNormalized = server.startsWith("ws://") || server.startsWith("wss://") ? server : `ws://${server}`;
@@ -97,6 +103,24 @@ function appendOptional(entries: Array<[string, string]>, key: string, value: nu
     return;
   }
   entries.push([key, String(value)]);
+}
+
+export function parseCurrentURLPacket(buffer: ArrayBuffer): CurrentURLPacket | null {
+  if (buffer.byteLength < CURRENT_URL_HEADER_SIZE) {
+    return null;
+  }
+
+  const view = new DataView(buffer);
+  const urlLen = view.getUint32(2, true); // Read 4-byte length at offset 2 (little-endian)
+
+  if (buffer.byteLength < CURRENT_URL_HEADER_SIZE + urlLen) {
+    return null;
+  }
+
+  const urlBytes = new Uint8Array(buffer, CURRENT_URL_HEADER_SIZE, urlLen);
+  const url = new TextDecoder().decode(urlBytes);
+
+  return { url };
 }
 
 export function parseFramePacket(buffer: ArrayBuffer): ParsedFrame | null {

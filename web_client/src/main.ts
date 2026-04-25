@@ -79,6 +79,7 @@ root.innerHTML = `
         <div class="metrics" id="metrics">status: idle</div>
         <select id="scale" class="scale-compact" aria-label="Scale"></select>
       </div>
+      <div class="current-url-display" id="currentUrlDisplay">Current URL: —</div>
     </section>
   </main>
 `;
@@ -96,6 +97,7 @@ const elDisconnect = byId<HTMLButtonElement>("disconnect");
 const elOpenUrl = byId<HTMLButtonElement>("openUrl");
 const elCanvas = byId<HTMLCanvasElement>("screen");
 const elMetrics = byId<HTMLDivElement>("metrics");
+const elCurrentUrlDisplay = byId<HTMLDivElement>("currentUrlDisplay");
 
 const settings = loadSettings();
 
@@ -116,6 +118,9 @@ applyDisplayScale(elCanvas, settings.width, settings.height, settings.scalePerce
 const client = new RemoteWebViewBrowserClient(renderer, {
   onMetrics(metrics) {
     elMetrics.textContent = `status: ${metrics.status} | frame: ${metrics.lastFrameId} | frames: ${metrics.frames} | bytes: ${metrics.bytes} | err: ${metrics.lastError}`;
+  },
+  onURL(url: string) {
+    elCurrentUrlDisplay.textContent = `Current URL: ${url}`;
   }
 });
 
