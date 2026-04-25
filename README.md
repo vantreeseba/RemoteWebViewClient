@@ -151,6 +151,10 @@ remote_webview:
   full_frame_tile_count: 1
   max_bytes_per_msg: 61440
   jpeg_quality: 85
+  on_frame_update:
+    - logger.log: "The display just received a frame update!"
+  current_url_sensor:
+    name: "Remote Display Current URL"
 
 text:
   - platform: template
@@ -188,6 +192,9 @@ text:
 | `max_bytes_per_msg`     | int (B)   | ❌       | `14336` or `61440`                | Upper bound for a single WS binary message. |
 | `big_endian`            | bool      | ❌       | `true` or `false`                 | Use big-endian RGB565 pixel order for JPEG output (set false for little-endian panels). Default is `true`. |
 | `rotation`              | int       | ❌       | 0, 90, 180, 270                   | Enables software rotation for both the display and touchscreen. |
+| `on_frame_update`       | action    | ❌       | `- logger.log: "The display just received a frame update!"`  | Action that gets triggered each time the display updates (maximum of 1 trigger per second) |
+| `current_url_sensor`    | text_sensor | ❌      | `name: "Current URL"`            | Exposes the URL currently loaded in the server's headless browser as an ESPHome Text Sensor. Supports on_value automations. |
+
 
 ## Recommendations
 
@@ -199,6 +206,9 @@ text:
 - **big_endian** — defaults to **true**. If colors look wrong (swapped/tinted), set `big_endian: false` for panels that require little-endian RGB565.
 - **Red tile / red screen** — this indicates a tile payload exceeded `max_bytes_per_msg`. Increase `max_bytes_per_msg` or reduce tile size/JPEG quality so each tile fits.
 
-## No on-screen keyboard
+## On-screen keyboard
 
-There’s no on-screen keyboard; you’ll need to [use Chrome DevTools](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) for any required input.
+The device does not provide a native on-screen keyboard.
+
+You can enable and use a server-side keyboard in [Remote WebView Server](https://github.com/strange-v/RemoteWebViewServer#on-screen-keyboard).
+You can also use [Chrome DevTools](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) when input is needed.

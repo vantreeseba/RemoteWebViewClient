@@ -19,6 +19,44 @@ namespace remote_webview {
 static const char *const TAG = "Remote_WebView";
 RemoteWebView *RemoteWebView::self_ = nullptr;
 
+//Below two functions are part of automation template testing
+void RemoteWebView::add_on_frame_update_callback(std::function<void()> &&callback) {
+  this->on_frame_update_callback_.add(std::move(callback));
+}
+void RemoteWebView::trigger_on_frame_update() {
+  uint32_t now = millis();
+  
+  if (now - this->last_trigger_ms_ < 1000) return;
+  
+  this->last_trigger_ms_ = now;
+  
+  ESP_LOGD(TAG, "Triggering the on_frame_update automation");
+  this->on_frame_update_callback_.call();
+}
+
+void RemoteWebView::process_current_url_packet_(const uint8_t *data, size_t len) {
+  if (!data || len < sizeof(proto::CurrentURLHeader)) return;
+  
+  auto *hdr = reinterpret_cast<const proto::CurrentURLHeader *>(data);
+  if (sizeof(proto::CurrentURLHeader) + hdr->url_len > len) return;
+  
+  if (this->url_sensor_ == nullptr) return;
+
+  std::string url(reinterpret_cast<const char*>(data + sizeof(proto::CurrentURLHeader)), hdr->url_len);
+  if (this->state_mtx_ && xSemaphoreTake(this->state_mtx_, pdMS_TO_TICKS(10)) == pdTRUE) {
+    this->pending_url_ = std::move(url);
+    this->url_publish_pending_.store(true, std::memory_order_release);
+    xSemaphoreGive(this->state_mtx_);
+  }
+}
+
+std::string RemoteWebView::get_current_url() const {
+  if (this->url_sensor_ != nullptr && this->url_sensor_->has_state()) {
+    return this->url_sensor_->state;
+  }
+  return "";
+}
+
 static inline void websocket_force_reconnect(esp_websocket_client_handle_t client) {
   if (!client) return;
   esp_websocket_client_stop(client);
@@ -38,6 +76,7 @@ void RemoteWebView::setup() {
 
   q_decode_ = xQueueCreate(cfg::decode_queue_depth, sizeof(WsMsg));
   ws_send_mtx_ = xSemaphoreCreateMutex();
+  state_mtx_ = xSemaphoreCreateMutex();
 
   start_decode_task_();
   start_ws_task_();
@@ -84,6 +123,26 @@ void RemoteWebView::setup() {
     }
   }
 #endif
+}
+
+void RemoteWebView::loop() {
+  if (this->frame_update_pending_.exchange(false, std::memory_order_acq_rel)) {
+    this->trigger_on_frame_update();
+  }
+
+  if (!this->url_sensor_) return;
+  if (!this->url_publish_pending_.exchange(false, std::memory_order_acq_rel)) return;
+
+  std::string url;
+  if (this->state_mtx_ && xSemaphoreTake(this->state_mtx_, pdMS_TO_TICKS(10)) == pdTRUE) {
+    url = this->pending_url_;
+    xSemaphoreGive(this->state_mtx_);
+  }
+
+  if (!url.empty()) {
+    this->url_sensor_->publish_state(url);
+    ESP_LOGD(TAG, "Current Server URL updated: %s", url.c_str());
+  }
 }
 
 void RemoteWebView::dump_config() {
@@ -301,6 +360,9 @@ void RemoteWebView::process_packet_(void * /*client*/, const uint8_t *data, size
     case proto::MsgType::FrameStats:
       process_frame_stats_packet_(data, len);
       break;
+    case proto::MsgType::CurrentURL: // deal with packet #6 here - aka our current display URL packet
+      process_current_url_packet_(data, len);
+      break;
     default:
       ESP_LOGW(TAG, "unknown packet type: %d", (int)type);
       break;
@@ -347,6 +409,8 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
     frame_stats_time_ += time_ms;
     frame_stats_count_++;
     ESP_LOGD(TAG, "frame %lu: tiles %u (%u bytes) - %lu ms", frame_id_, frame_tiles_, frame_bytes_, time_ms);
+
+    this->frame_update_pending_.store(true, std::memory_order_release);
   }
 }
 
