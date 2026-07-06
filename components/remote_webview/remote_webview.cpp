@@ -254,17 +254,23 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
       } while (xQueueReceive(self->q_send_, &m, 0) == pdTRUE);
     }
 
+    if (self->ws_restart_pending_.exchange(false, std::memory_order_acq_rel)) {
+      ESP_LOGI(TAG, "[ws] server closed the connection, restarting client");
+      websocket_force_reconnect(client);
+      last_up_us = esp_timer_get_time();
+    }
+
     const uint64_t now = esp_timer_get_time();
     if (now - last_supervise_us < cfg::ws_supervise_interval_us) continue;
     last_supervise_us = now;
 
     if (!esp_websocket_client_is_connected(client)) {
-      // Auto-reconnect (reconnect_timeout_ms) handles routine drops; only
-      // force a stop/start if the client has been wedged for a long time.
+      // Auto-reconnect (reconnect_timeout_ms) handles routine drops. Once the
+      // client has been down past the stuck threshold, keep forcing a restart
+      // every supervise tick until it comes back — last_up_us stays put.
       if (now - last_up_us >= cfg::ws_stuck_reconnect_us) {
         ESP_LOGW(TAG, "[ws] disconnected too long, forcing reconnect");
         websocket_force_reconnect(client);
-        last_up_us = now;
       }
       continue;
     }
@@ -329,9 +335,15 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
 
 #ifdef WEBSOCKET_EVENT_CLOSED
     case WEBSOCKET_EVENT_CLOSED:
-      if (self_) self_->ws_client_ = nullptr;
+      // A completed close handshake stops the client task; auto-reconnect
+      // only covers error paths. Ask the WS task to restart the client —
+      // calling stop() from this (the client's own event) task is unsafe.
+      if (self_) {
+        self_->ws_client_ = nullptr;
+        self_->last_keepalive_us_ = 0;
+        self_->ws_restart_pending_.store(true, std::memory_order_release);
+      }
       ESP_LOGI(TAG, "[ws] closed");
-      if (self_) self_->last_keepalive_us_ = 0;
       reasm_reset_(*r);
       break;
 #endif

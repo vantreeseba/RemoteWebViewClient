@@ -135,6 +135,7 @@ class RemoteWebView : public Component {
 
   std::atomic<bool> frame_update_pending_{false};
   std::atomic<bool> url_publish_pending_{false};
+  std::atomic<bool> ws_restart_pending_{false};
   std::string pending_url_{};
   SemaphoreHandle_t state_mtx_{nullptr};
 
