@@ -775,7 +775,7 @@ RemoteWebViewTouchListener::PointerSlot *RemoteWebViewTouchListener::claim_slot_
     if (!slot.active) {
       slot.active = true;
       slot.id = id;
-      return slot;
+      return &slot;
     }
   }
   return nullptr;
