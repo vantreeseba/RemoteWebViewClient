@@ -16,7 +16,7 @@ import { CanvasRenderer } from "./canvasRenderer";
 const KEEPALIVE_INTERVAL_MS = 60_000;
 const MOVE_INTERVAL_MS = 1000 / 60;
 
-type Metrics = {
+export type Metrics = {
   status: string;
   frames: number;
   bytes: number;

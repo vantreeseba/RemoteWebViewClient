@@ -2,6 +2,7 @@ import "./app.css";
 import { CanvasRenderer } from "./canvasRenderer";
 import { TouchType } from "./protocol";
 import { RemoteWebViewBrowserClient } from "./wsClient";
+import type { Metrics } from "./wsClient";
 
 type UiSettings = {
   server: string;
@@ -115,9 +116,24 @@ elUrl.value = settings.url;
 const renderer = new CanvasRenderer(elCanvas, settings.width, settings.height);
 applyDisplayScale(elCanvas, settings.width, settings.height, settings.scalePercent);
 
+// Metrics arrive per packet; coalesce DOM writes to one per animation frame.
+let latestMetrics: Metrics | null = null;
+let metricsRafId: number | null = null;
+
 const client = new RemoteWebViewBrowserClient(renderer, {
   onMetrics(metrics) {
-    elMetrics.textContent = `status: ${metrics.status} | frame: ${metrics.lastFrameId} | frames: ${metrics.frames} | bytes: ${metrics.bytes} | err: ${metrics.lastError}`;
+    latestMetrics = metrics;
+    if (metricsRafId !== null) {
+      return;
+    }
+    metricsRafId = requestAnimationFrame(() => {
+      metricsRafId = null;
+      const m = latestMetrics;
+      if (!m) {
+        return;
+      }
+      elMetrics.textContent = `status: ${m.status} | frame: ${m.lastFrameId} | frames: ${m.frames} | bytes: ${m.bytes} | err: ${m.lastError}`;
+    });
   },
   onURL(url: string) {
     elCurrentUrlDisplay.textContent = `Current URL: ${url}`;
