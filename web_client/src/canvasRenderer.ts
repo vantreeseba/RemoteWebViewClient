@@ -27,10 +27,13 @@ export class CanvasRenderer {
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  async drawJpegTile(tileData: Uint8Array<ArrayBuffer>, x: number, y: number, w: number, h: number): Promise<void> {
+  decodeJpegTile(tileData: Uint8Array<ArrayBuffer>): Promise<ImageBitmap> {
     // Blob respects the view's offset/length and copies internally — no slice needed.
     const blob = new Blob([tileData], { type: "image/jpeg" });
-    const bitmap = await createImageBitmap(blob);
+    return createImageBitmap(blob);
+  }
+
+  drawBitmap(bitmap: ImageBitmap, x: number, y: number, w: number, h: number): void {
     this.ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height, x, y, w, h);
     bitmap.close();
   }

@@ -211,11 +211,18 @@ export class RemoteWebViewBrowserClient {
         return;
       }
 
-      for (const tile of parsed.tiles) {
-        if (tile.w === 0 || tile.h === 0) {
-          continue;
-        }
-        await this.renderer.drawJpegTile(tile.data, tile.x, tile.y, tile.w, tile.h);
+      const tiles = parsed.tiles.filter((tile) => tile.w > 0 && tile.h > 0);
+      try {
+        // Decode all tiles concurrently, then draw in packet order.
+        const bitmaps = await Promise.all(tiles.map((tile) => this.renderer.decodeJpegTile(tile.data)));
+        bitmaps.forEach((bitmap, i) => {
+          const tile = tiles[i];
+          this.renderer.drawBitmap(bitmap, tile.x, tile.y, tile.w, tile.h);
+        });
+      } catch {
+        this.lastError = "tile decode failed";
+        this.pushMetrics("warning");
+        return;
       }
 
       if (parsed.header.flags & FLAG_LAST_OF_FRAME) {
