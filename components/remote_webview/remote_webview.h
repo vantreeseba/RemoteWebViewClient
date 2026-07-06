@@ -167,6 +167,7 @@ class RemoteWebView : public Component {
   int jpeg_draw_cb_(JPEGDRAW *p);
   JPEGDEC jd_;
 
+  static bool out_msg_droppable_(const OutMsg &m);
   bool enqueue_out_msg_(OutMsg &m, bool evict_on_full);
   bool queue_ws_packet_(const uint8_t *pkt, size_t len, bool evict_on_full = false);
   bool ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid);

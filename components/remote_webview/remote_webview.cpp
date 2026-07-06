@@ -321,14 +321,37 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
   }
 }
 
+// Moves, keepalives, and frame stats can be regenerated; Down/Up and OpenURL
+// must never be shed once queued.
+bool RemoteWebView::out_msg_droppable_(const OutMsg &m) {
+  if (m.ext) return false;  // OpenURL
+  if (m.len >= 3 && m.buf[0] == (uint8_t) proto::MsgType::Touch)
+    return (proto::TouchType) m.buf[2] == proto::TouchType::Move;
+  return true;
+}
+
 bool RemoteWebView::enqueue_out_msg_(OutMsg &m, bool evict_on_full) {
   if (!q_send_) return false;
   if (xQueueSend(q_send_, &m, 0) == pdTRUE) return true;
   if (!evict_on_full) return false;
-  // Make room for packets that must not be lost (touch Down/Up, OpenURL) by
-  // shedding the oldest queued packet — typically a stale Move.
-  OutMsg discarded;
-  if (xQueueReceive(q_send_, &discarded, 0) == pdTRUE && discarded.ext) free(discarded.ext);
+
+  // Make room by shedding the oldest droppable packet; protected packets
+  // are put back at the front in their original order.
+  OutMsg kept[cfg::send_queue_depth];
+  int kept_count = 0;
+  bool freed = false;
+  OutMsg cur;
+  while (!freed && kept_count < cfg::send_queue_depth &&
+         xQueueReceive(q_send_, &cur, 0) == pdTRUE) {
+    if (out_msg_droppable_(cur)) {
+      freed = true;
+    } else {
+      kept[kept_count++] = cur;
+    }
+  }
+  for (int i = kept_count - 1; i >= 0; i--)
+    xQueueSendToFront(q_send_, &kept[i], 0);
+  if (!freed) return false;
   return xQueueSend(q_send_, &m, 0) == pdTRUE;
 }
 
