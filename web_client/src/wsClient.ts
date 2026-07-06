@@ -42,6 +42,9 @@ export class RemoteWebViewBrowserClient {
   private generation = 0;
   private reconnectDelayMs = 1000;
 
+  // One id per client instance: reconnects must not register as new devices,
+  // since every abandoned session lives on the server until idle cleanup.
+  private readonly clientId = `browser-${crypto.randomUUID().slice(0, 8)}`;
   private maxBytesPerMsg = 64 * 1024;
   private keepaliveId: number | null = null;
   private reconnectId: number | null = null;
@@ -61,11 +64,13 @@ export class RemoteWebViewBrowserClient {
   connect(server: string, options: QueryOptions): void {
     this.disconnect();
 
-    if (options.mbpm && options.mbpm > 0) {
-      this.maxBytesPerMsg = options.mbpm;
+    const opts: QueryOptions = { ...options, id: options.id ?? this.clientId };
+
+    if (opts.mbpm && opts.mbpm > 0) {
+      this.maxBytesPerMsg = opts.mbpm;
     }
 
-    const uri = buildWsUri(server, options);
+    const uri = buildWsUri(server, opts);
     const ws = new WebSocket(uri);
     ws.binaryType = "arraybuffer";
     // Assign before any handler can fire, so disconnect() can tear down a
@@ -84,7 +89,7 @@ export class RemoteWebViewBrowserClient {
     ws.onclose = () => {
       this.stopKeepalive();
       this.pushMetrics("disconnected");
-      this.scheduleReconnect(server, options);
+      this.scheduleReconnect(server, opts);
     };
 
     ws.onerror = () => {
