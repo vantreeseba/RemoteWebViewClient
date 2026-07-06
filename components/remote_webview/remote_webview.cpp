@@ -499,7 +499,9 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
     frame_stats_bytes_ += frame_bytes_;
     frame_stats_time_ += time_ms;
     frame_stats_count_++;
-    ESP_LOGD(TAG, "frame %lu: tiles %u (%u bytes) - %lu ms", frame_id_, frame_tiles_, frame_bytes_, time_ms);
+    // Verbose, not debug: ESPHome defaults to DEBUG and blocking UART output
+    // here costs ~5 ms per frame on the decode core.
+    ESP_LOGV(TAG, "frame %lu: tiles %u (%u bytes) - %lu ms", frame_id_, frame_tiles_, frame_bytes_, time_ms);
 
     this->frame_update_pending_.store(true, std::memory_order_release);
   }
