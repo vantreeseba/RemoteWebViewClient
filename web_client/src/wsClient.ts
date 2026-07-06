@@ -65,9 +65,12 @@ export class RemoteWebViewBrowserClient {
     const uri = buildWsUri(server, options);
     const ws = new WebSocket(uri);
     ws.binaryType = "arraybuffer";
+    // Assign before any handler can fire, so disconnect() can tear down a
+    // socket that is still CONNECTING — otherwise its onclose fires later
+    // and schedules a reconnect the user just cancelled.
+    this.ws = ws;
 
     ws.onopen = () => {
-      this.ws = ws;
       this.reconnectDelayMs = 1000;
       this.startKeepalive();
       this.pushMetrics("connected");
