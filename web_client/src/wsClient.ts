@@ -5,6 +5,7 @@ import {
   buildWsUri,
   Encoding,
   FLAG_LAST_OF_FRAME,
+  frameIdOf,
   MsgType,
   parseFramePacket,
   parseCurrentURLPacket,
@@ -110,9 +111,16 @@ export class RemoteWebViewBrowserClient {
 
       this.bytes += event.data.byteLength;
       this.inboundQueue.push(event.data);
-      // Backpressure: when decode falls behind, shed the oldest packets so
-      // the display tracks real time instead of drifting ever further back.
+      // Backpressure: when decode falls behind, shed stale frames — but never
+      // tiles of the frame currently arriving, which nothing resends.
       while (this.inboundQueue.length > MAX_INBOUND_QUEUE) {
+        const oldestFid = frameIdOf(this.inboundQueue[0]);
+        if (oldestFid !== null && oldestFid === frameIdOf(event.data)) {
+          // The whole queue is the current frame; drop the newest instead.
+          this.inboundQueue.pop();
+          this.lastError = "inbound queue overflow mid-frame";
+          break;
+        }
         this.inboundQueue.shift();
       }
       this.drainQueue();

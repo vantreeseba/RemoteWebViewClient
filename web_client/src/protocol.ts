@@ -105,6 +105,17 @@ function appendOptional(entries: Array<[string, string]>, key: string, value: nu
   entries.push([key, String(value)]);
 }
 
+export function frameIdOf(buffer: ArrayBuffer): number | null {
+  if (buffer.byteLength < FRAME_HEADER_SIZE) {
+    return null;
+  }
+  const view = new DataView(buffer);
+  if (view.getUint8(0) !== MsgType.Frame) {
+    return null;
+  }
+  return view.getUint32(2, true);
+}
+
 export function parseCurrentURLPacket(buffer: ArrayBuffer): CurrentURLPacket | null {
   if (buffer.byteLength < CURRENT_URL_HEADER_SIZE) {
     return null;
