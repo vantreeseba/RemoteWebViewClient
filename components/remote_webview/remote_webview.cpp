@@ -57,6 +57,14 @@ std::string RemoteWebView::get_current_url() const {
   return "";
 }
 
+// True when both messages are Frame packets carrying the same frame id —
+// evicting one of those would tear a frame the delta protocol never repairs.
+bool RemoteWebView::is_same_frame_(const WsMsg &a, const WsMsg &b) {
+  if (a.len < sizeof(proto::FrameHeader) || b.len < sizeof(proto::FrameHeader)) return false;
+  if (a.buf[0] != (uint8_t) proto::MsgType::Frame || b.buf[0] != (uint8_t) proto::MsgType::Frame) return false;
+  return proto::rd32(a.buf + 2) == proto::rd32(b.buf + 2);
+}
+
 static inline void websocket_force_reconnect(esp_websocket_client_handle_t client) {
   if (!client) return;
   esp_websocket_client_stop(client);
@@ -408,15 +416,27 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
         if (!self_->q_decode_) {
           self_->release_msg_buf_(m.buf);
         } else if (xQueueSend(self_->q_decode_, &m, 0) != pdTRUE) {
-          // Queue full: evict the oldest queued packet — stale tiles are worth
-          // less than the newest ones, which the next frame builds on.
+          // Queue full: evict the oldest queued packet only if it belongs to
+          // an OLDER frame — stale frames are shed, but tiles of the frame
+          // still being received must survive (nothing resends them).
           WsMsg oldest;
-          if (xQueueReceive(self_->q_decode_, &oldest, 0) == pdTRUE)
-            self_->release_msg_buf_(oldest.buf);
-          if (xQueueSend(self_->q_decode_, &m, 0) == pdTRUE) {
-            ESP_LOGW(TAG, "decode queue full, dropped oldest packet");
+          if (xQueueReceive(self_->q_decode_, &oldest, 0) == pdTRUE) {
+            if (is_same_frame_(oldest, m)) {
+              // The whole queue is this frame: depth is too small for the
+              // frame's message count. Keep the older tiles, drop the newest.
+              xQueueSendToFront(self_->q_decode_, &oldest, 0);
+              ESP_LOGW(TAG, "decode queue full mid-frame, dropping packet (raise decode_queue_depth or max_bytes_per_msg)");
+              self_->release_msg_buf_(m.buf);
+            } else {
+              self_->release_msg_buf_(oldest.buf);
+              if (xQueueSend(self_->q_decode_, &m, 0) == pdTRUE) {
+                ESP_LOGW(TAG, "decode queue full, dropped oldest packet");
+              } else {
+                ESP_LOGW(TAG, "decode queue full, dropping packet");
+                self_->release_msg_buf_(m.buf);
+              }
+            }
           } else {
-            ESP_LOGW(TAG, "decode queue full, dropping packet");
             self_->release_msg_buf_(m.buf);
           }
         }

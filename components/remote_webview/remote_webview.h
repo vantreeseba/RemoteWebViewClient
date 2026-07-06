@@ -153,6 +153,7 @@ class RemoteWebView : public Component {
 
   static void ws_event_handler_(void *handler_arg, esp_event_base_t base, int32_t event_id, void *event_data);
   static void reasm_reset_(WsReasm &r);
+  static bool is_same_frame_(const WsMsg &a, const WsMsg &b);
   uint8_t *acquire_msg_buf_();
   void release_msg_buf_(uint8_t *buf);
 
