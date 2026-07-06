@@ -37,6 +37,9 @@ export class RemoteWebViewBrowserClient {
 
   private readonly inboundQueue: ArrayBuffer[] = [];
   private processing = false;
+  // Bumped on disconnect; in-flight async work checks it after every await
+  // so a completed decode can't draw or push metrics for a dead connection.
+  private generation = 0;
   private reconnectDelayMs = 1000;
 
   private maxBytesPerMsg = 64 * 1024;
@@ -127,6 +130,7 @@ export class RemoteWebViewBrowserClient {
     }
 
     this.inboundQueue.length = 0;
+    this.generation += 1;
     this.processing = false;
   }
 
@@ -192,17 +196,21 @@ export class RemoteWebViewBrowserClient {
     }
 
     this.processing = true;
+    const gen = this.generation;
     try {
-      while (this.inboundQueue.length > 0) {
+      while (gen === this.generation && this.inboundQueue.length > 0) {
         const buffer = this.inboundQueue.shift() as ArrayBuffer;
-        await this.processPacket(buffer);
+        await this.processPacket(buffer, gen);
       }
     } finally {
-      this.processing = false;
+      // A stale loop must not clear the flag out from under its successor.
+      if (gen === this.generation) {
+        this.processing = false;
+      }
     }
   }
 
-  private async processPacket(buffer: ArrayBuffer): Promise<void> {
+  private async processPacket(buffer: ArrayBuffer, gen: number): Promise<void> {
     const view = new DataView(buffer);
     const type = view.getUint8(0);
 
@@ -225,6 +233,14 @@ export class RemoteWebViewBrowserClient {
       // so one corrupt tile neither discards its siblings nor leaks their
       // decoded bitmaps (drawBitmap closes each one).
       const results = await Promise.allSettled(tiles.map((tile) => this.renderer.decodeJpegTile(tile.data)));
+      if (gen !== this.generation) {
+        results.forEach((result) => {
+          if (result.status === "fulfilled") {
+            result.value.close();
+          }
+        });
+        return;
+      }
       let failed = 0;
       results.forEach((result, i) => {
         if (result.status === "fulfilled") {
