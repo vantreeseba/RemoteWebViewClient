@@ -189,8 +189,18 @@ export class RemoteWebViewBrowserClient {
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, 15_000);
   }
 
+  // Frozen background tabs (Energy Saver, mobile suspension) stop timers
+  // entirely; probe liveness the moment the tab returns so the server's
+  // 5-minute idle cleanup doesn't win the race.
+  private readonly onVisibilityChange = () => {
+    if (document.visibilityState === "visible" && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(buildKeepalivePacket());
+    }
+  };
+
   private startKeepalive(): void {
     this.stopKeepalive();
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
     this.keepaliveId = window.setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(buildKeepalivePacket());
@@ -199,6 +209,7 @@ export class RemoteWebViewBrowserClient {
   }
 
   private stopKeepalive(): void {
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
     if (this.keepaliveId !== null) {
       clearInterval(this.keepaliveId);
       this.keepaliveId = null;
