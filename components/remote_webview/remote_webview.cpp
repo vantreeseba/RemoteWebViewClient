@@ -75,6 +75,7 @@ void RemoteWebView::setup() {
   display_height_ = display_->get_height();
 
   q_decode_ = xQueueCreate(cfg::decode_queue_depth, sizeof(WsMsg));
+  q_send_ = xQueueCreate(cfg::send_queue_depth, sizeof(OutMsg));
   ws_send_mtx_ = xSemaphoreCreateMutex();
   state_mtx_ = xSemaphoreCreateMutex();
 
@@ -237,16 +238,31 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
   ESP_ERROR_CHECK(esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, ws_event_handler_, &reasm));
   ESP_ERROR_CHECK(esp_websocket_client_start(client));
 
+  uint64_t last_supervise_us = esp_timer_get_time();
   for (;;) {
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    OutMsg m;
+    if (xQueueReceive(self->q_send_, &m, pdMS_TO_TICKS(250)) == pdTRUE) {
+      do {
+        if (self->ws_client_ && self->ws_send_mtx_ && esp_websocket_client_is_connected(self->ws_client_)) {
+          const TickType_t to = pdMS_TO_TICKS(50);
+          if (xSemaphoreTake(self->ws_send_mtx_, to) == pdTRUE) {
+            esp_websocket_client_send_bin(self->ws_client_, (const char *) m.buf, (int) m.len, to);
+            xSemaphoreGive(self->ws_send_mtx_);
+          }
+        }
+      } while (xQueueReceive(self->q_send_, &m, 0) == pdTRUE);
+    }
+
+    const uint64_t now = esp_timer_get_time();
+    if (now - last_supervise_us < cfg::ws_supervise_interval_us) continue;
+    last_supervise_us = now;
 
     if (!esp_websocket_client_is_connected(client)) {
       websocket_force_reconnect(client);
       continue;
     }
 
-    if (self && self->ws_client_ && esp_websocket_client_is_connected(self->ws_client_)) {
-      const uint64_t now = esp_timer_get_time();
+    if (self->ws_client_ && esp_websocket_client_is_connected(self->ws_client_)) {
       if (now - self->last_keepalive_us_ >= cfg::ws_keepalive_interval_us) {
         if (self->ws_send_keepalive_()) {
           self->last_keepalive_us_ = now;
@@ -255,6 +271,14 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
       }
     }
   }
+}
+
+bool RemoteWebView::queue_ws_packet_(const uint8_t *pkt, size_t len) {
+  if (!q_send_ || !pkt || len == 0 || len > cfg::send_msg_max_bytes) return false;
+  OutMsg m;
+  m.len = (uint8_t) len;
+  memcpy(m.buf, pkt, len);
+  return xQueueSend(q_send_, &m, 0) == pdTRUE;
 }
 
 void RemoteWebView::reasm_reset_(WsReasm &r) {
@@ -569,7 +593,7 @@ bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, ui
   if (touch_disabled_)
     return false;
 
-  if (!ws_client_ || !ws_send_mtx_ || !esp_websocket_client_is_connected(ws_client_))
+  if (!ws_client_ || !esp_websocket_client_is_connected(ws_client_))
     return false;
 
   if (x < 0) x = 0; if (y < 0) y = 0;
@@ -578,13 +602,8 @@ bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, ui
   uint8_t pkt[sizeof(proto::TouchPacket)];
   const size_t n = proto::build_touch_packet(type, pid, x, y, pkt);
 
-  const TickType_t to = pdMS_TO_TICKS(50);
-  if (xSemaphoreTake(ws_send_mtx_, pdMS_TO_TICKS(10)) != pdTRUE)
-    return false;
-
-  int r = esp_websocket_client_send_bin(ws_client_, (const char*)pkt, (int)n, to);
-  xSemaphoreGive(ws_send_mtx_);
-  return r == (int)n;
+  // Queued for the WS task — a slow socket must never stall the main loop.
+  return queue_ws_packet_(pkt, n);
 }
 
 bool RemoteWebView::ws_send_open_url_(const char *url, uint16_t flags) {

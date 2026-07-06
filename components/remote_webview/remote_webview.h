@@ -70,6 +70,10 @@ class RemoteWebView : public Component {
     uint8_t *buf{nullptr};
     size_t total{0}, filled{0};
   };
+  struct OutMsg {
+    uint8_t len{0};
+    uint8_t buf[cfg::send_msg_max_bytes]{};
+  };
 
   CallbackManager<void()> on_frame_update_callback_{};
 
@@ -121,6 +125,7 @@ class RemoteWebView : public Component {
 
   QueueHandle_t     q_decode_{nullptr};
   QueueHandle_t     q_free_{nullptr};
+  QueueHandle_t     q_send_{nullptr};
   size_t            reasm_buf_size_{0};
   SemaphoreHandle_t ws_send_mtx_{nullptr};
   TaskHandle_t      t_ws_{nullptr};
@@ -156,6 +161,7 @@ class RemoteWebView : public Component {
   int jpeg_draw_cb_(JPEGDRAW *p);
   JPEGDEC jd_;
 
+  bool queue_ws_packet_(const uint8_t *pkt, size_t len);
   bool ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid);
   bool ws_send_keepalive_();
   bool ws_send_open_url_(const char *url, uint16_t flags);
