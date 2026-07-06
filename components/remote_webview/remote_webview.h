@@ -186,6 +186,10 @@ class RemoteWebViewTouchListener : public touchscreen::TouchListener {
   void release() override;
  private:
   RemoteWebView *parent_{nullptr};
+  // Last reported point, so release() can send Up at the lift position.
+  int16_t last_x_{0}, last_y_{0};
+  uint8_t last_id_{0};
+  bool up_sent_{true};
 };
 
 }  // namespace remote_webview

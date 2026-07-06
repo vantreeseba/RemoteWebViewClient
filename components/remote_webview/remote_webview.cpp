@@ -683,9 +683,18 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
 
   const uint64_t now = esp_timer_get_time();
   for (auto &p : pts) {
+    // STATE_RELEASING is a flag OR'd into the state (e.g. PRESSED|RELEASING),
+    // so it must be tested as a bit, never as a switch case.
+    if (p.state & touchscreen::STATE_RELEASING) {
+      parent_->ws_send_touch_event_(proto::TouchType::Up, p.x, p.y, p.id);
+      up_sent_ = true;
+      continue;
+    }
     switch (p.state) {
       case touchscreen::STATE_PRESSED:
         parent_->ws_send_touch_event_(proto::TouchType::Down, p.x, p.y, p.id);
+        last_x_ = p.x; last_y_ = p.y; last_id_ = p.id;
+        up_sent_ = false;
         break;
       case touchscreen::STATE_UPDATED:
         if (!RemoteWebView::kCoalesceMoves || RemoteWebView::kMoveIntervalUs == 0 ||
@@ -693,10 +702,7 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
           parent_->last_move_us_ = now;
           parent_->ws_send_touch_event_(proto::TouchType::Move, p.x, p.y, p.id);
         }
-        break;
-      case touchscreen::STATE_RELEASING:
-      case touchscreen::STATE_RELEASED:
-        parent_->ws_send_touch_event_(proto::TouchType::Up, p.x, p.y, p.id);
+        last_x_ = p.x; last_y_ = p.y; last_id_ = p.id;
         break;
       default: break;
     }
@@ -704,15 +710,18 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
 }
 
 void RemoteWebViewTouchListener::release() {
-  if (!parent_) return;
-  
-  parent_->ws_send_touch_event_(proto::TouchType::Up, 0, 0, 0);
+  if (!parent_ || up_sent_) return;
+
+  // Fallback if no RELEASING point was delivered: lift at the last known
+  // position, not (0,0) — the server maps Up to a click/drag-end location.
+  parent_->ws_send_touch_event_(proto::TouchType::Up, last_x_, last_y_, last_id_);
+  up_sent_ = true;
 }
 
 void RemoteWebViewTouchListener::touch(touchscreen::TouchPoint tp) {
-  if (!parent_) return;
-  
-  parent_->ws_send_touch_event_(proto::TouchType::Down, tp.x, tp.y, tp.id);
+  // Intentionally empty: ESPHome invokes both touch() and update() for the
+  // first press (update() sees STATE_PRESSED), so sending here duplicated
+  // every Down. update() is the single source of touch packets.
 }
 
 void RemoteWebView::disable_touch(bool disable) {
