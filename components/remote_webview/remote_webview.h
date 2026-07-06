@@ -73,6 +73,10 @@ class RemoteWebView : public Component {
   struct OutMsg {
     uint8_t len{0};
     uint8_t buf[cfg::send_msg_max_bytes]{};
+    // Payloads larger than buf (OpenURL) travel as an owned heap block that
+    // the WS task frees after sending (or on eviction/drop).
+    uint8_t *ext{nullptr};
+    size_t ext_len{0};
   };
 
   CallbackManager<void()> on_frame_update_callback_{};
@@ -162,6 +166,7 @@ class RemoteWebView : public Component {
   int jpeg_draw_cb_(JPEGDRAW *p);
   JPEGDEC jd_;
 
+  bool enqueue_out_msg_(OutMsg &m, bool evict_on_full);
   bool queue_ws_packet_(const uint8_t *pkt, size_t len, bool evict_on_full = false);
   bool ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid);
   bool ws_send_keepalive_();

@@ -251,13 +251,18 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
     OutMsg m;
     if (xQueueReceive(self->q_send_, &m, pdMS_TO_TICKS(250)) == pdTRUE) {
       do {
+        const uint8_t *payload = m.ext ? m.ext : m.buf;
+        const size_t payload_len = m.ext ? m.ext_len : m.len;
         if (self->ws_client_ && self->ws_send_mtx_ && esp_websocket_client_is_connected(self->ws_client_)) {
-          const TickType_t to = pdMS_TO_TICKS(50);
-          if (xSemaphoreTake(self->ws_send_mtx_, to) == pdTRUE) {
-            esp_websocket_client_send_bin(self->ws_client_, (const char *) m.buf, (int) m.len, to);
+          // Large payloads (OpenURL) are rare; give them the longer timeout
+          // the old synchronous path had.
+          const TickType_t send_to = m.ext ? pdMS_TO_TICKS(200) : pdMS_TO_TICKS(50);
+          if (xSemaphoreTake(self->ws_send_mtx_, pdMS_TO_TICKS(50)) == pdTRUE) {
+            esp_websocket_client_send_bin(self->ws_client_, (const char *) payload, (int) payload_len, send_to);
             xSemaphoreGive(self->ws_send_mtx_);
           }
         }
+        if (m.ext) free(m.ext);
       } while (xQueueReceive(self->q_send_, &m, 0) == pdTRUE);
     }
 
@@ -294,18 +299,23 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
   }
 }
 
+bool RemoteWebView::enqueue_out_msg_(OutMsg &m, bool evict_on_full) {
+  if (!q_send_) return false;
+  if (xQueueSend(q_send_, &m, 0) == pdTRUE) return true;
+  if (!evict_on_full) return false;
+  // Make room for packets that must not be lost (touch Down/Up, OpenURL) by
+  // shedding the oldest queued packet — typically a stale Move.
+  OutMsg discarded;
+  if (xQueueReceive(q_send_, &discarded, 0) == pdTRUE && discarded.ext) free(discarded.ext);
+  return xQueueSend(q_send_, &m, 0) == pdTRUE;
+}
+
 bool RemoteWebView::queue_ws_packet_(const uint8_t *pkt, size_t len, bool evict_on_full) {
-  if (!q_send_ || !pkt || len == 0 || len > cfg::send_msg_max_bytes) return false;
+  if (!pkt || len == 0 || len > cfg::send_msg_max_bytes) return false;
   OutMsg m;
   m.len = (uint8_t) len;
   memcpy(m.buf, pkt, len);
-  if (xQueueSend(q_send_, &m, 0) == pdTRUE) return true;
-  if (!evict_on_full) return false;
-  // Make room for packets that must not be lost (touch Down/Up) by
-  // shedding the oldest queued packet — typically a stale Move.
-  OutMsg discarded;
-  xQueueReceive(q_send_, &discarded, 0);
-  return xQueueSend(q_send_, &m, 0) == pdTRUE;
+  return enqueue_out_msg_(m, evict_on_full);
 }
 
 void RemoteWebView::reasm_reset_(WsReasm &r) {
@@ -640,29 +650,32 @@ bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, ui
 }
 
 bool RemoteWebView::ws_send_open_url_(const char *url, uint16_t flags) {
-  if (!ws_client_ || !ws_send_mtx_ ||  !url || !esp_websocket_client_is_connected(ws_client_))
+  if (!ws_client_ || !url || !esp_websocket_client_is_connected(ws_client_))
     return false;
 
   const uint32_t n = (uint32_t) strlen(url);
   const size_t total = sizeof(proto::OpenURLHeader) + (size_t) n;
-  
+
   if (total > 16 * 1024) return false;
 
-    auto *pkt = (uint8_t *) heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  auto *pkt = (uint8_t *) heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!pkt) pkt = (uint8_t *) heap_caps_malloc(total, MALLOC_CAP_8BIT);
   if (!pkt) return false;
 
   const size_t written = proto::build_open_url_packet(url, flags, pkt, total);
-  bool ok = false;
-  if (written) {
-    if (xSemaphoreTake(ws_send_mtx_, pdMS_TO_TICKS(50)) == pdTRUE) {
-      const int r = esp_websocket_client_send_bin(ws_client_, (const char *) pkt, (int) written, pdMS_TO_TICKS(200));
-      xSemaphoreGive(ws_send_mtx_);
-      ok = (r == (int) written);
-    }
+  if (!written) {
+    free(pkt);
+    return false;
   }
+
+  // Queued for the WS task like every other producer-side send — automations
+  // call open_url() on the main loop, which must never block on the socket.
+  OutMsg m;
+  m.ext = pkt;
+  m.ext_len = written;
+  if (enqueue_out_msg_(m, true)) return true;
   free(pkt);
-  return ok;
+  return false;
 }
 
 bool RemoteWebView::ws_send_keepalive_() {
