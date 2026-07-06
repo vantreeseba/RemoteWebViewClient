@@ -7,7 +7,9 @@ namespace cfg {
 inline constexpr int decode_task_stack = 32 * 1024;
 inline constexpr int ws_task_stack = 8 * 1024;
 inline constexpr int ws_task_prio = 5;
-inline constexpr int decode_queue_depth = 12;
+// Kept shallow on purpose: with drop-oldest eviction a deep queue is pure
+// standing latency (frames behind glass) whenever decode is the bottleneck.
+inline constexpr int decode_queue_depth = 4;
 // Message-buffer pool: queue depth + one buffer being reassembled + one being decoded
 inline constexpr int msg_pool_extra = 2;
 // Without PSRAM the pool may take at most this many buffers from internal
