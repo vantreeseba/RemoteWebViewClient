@@ -15,6 +15,7 @@ import { CanvasRenderer } from "./canvasRenderer";
 
 const KEEPALIVE_INTERVAL_MS = 60_000;
 const MOVE_INTERVAL_MS = 1000 / 60;
+const MAX_INBOUND_QUEUE = 32;
 
 export type Metrics = {
   status: string;
@@ -96,6 +97,11 @@ export class RemoteWebViewBrowserClient {
 
       this.bytes += event.data.byteLength;
       this.inboundQueue.push(event.data);
+      // Backpressure: when decode falls behind, shed the oldest packets so
+      // the display tracks real time instead of drifting ever further back.
+      while (this.inboundQueue.length > MAX_INBOUND_QUEUE) {
+        this.inboundQueue.shift();
+      }
       this.drainQueue();
     };
   }
