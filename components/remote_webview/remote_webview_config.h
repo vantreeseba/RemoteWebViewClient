@@ -24,6 +24,10 @@ inline constexpr uint32_t ws_supervise_interval_us = 5 * 1000 * 1000;
 // Watchdog: force a client restart only after auto-reconnect has been
 // down this long — routine reconnects are the client library's job.
 inline constexpr uint64_t ws_stuck_reconnect_us = 30ull * 1000 * 1000;
+// Give each forced restart longer than network_timeout_ms (10 s) to
+// establish before forcing again — stop() aborts an in-flight connect,
+// so retrying faster than a slow connect completes would livelock.
+inline constexpr uint64_t ws_forced_retry_interval_us = 15ull * 1000 * 1000;
 
 // Outbound queue for small fixed-size packets (touch, frame stats),
 // drained by the WS task so producers never block on the socket.

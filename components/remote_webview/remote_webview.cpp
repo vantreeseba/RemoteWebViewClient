@@ -255,6 +255,7 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
 
   uint64_t last_supervise_us = esp_timer_get_time();
   uint64_t last_up_us = esp_timer_get_time();
+  uint64_t last_forced_us = 0;
   for (;;) {
     OutMsg m;
     if (xQueueReceive(self->q_send_, &m, pdMS_TO_TICKS(250)) == pdTRUE) {
@@ -276,8 +277,13 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
 
     if (self->ws_restart_pending_.exchange(false, std::memory_order_acq_rel)) {
       ESP_LOGI(TAG, "[ws] server closed the connection, restarting client");
+      // The CLOSED event is dispatched from inside the client task shortly
+      // before it exits; give it a beat so stop()/start() can't overlap a
+      // task that is still tearing itself down.
+      vTaskDelay(pdMS_TO_TICKS(100));
       websocket_force_reconnect(client);
       last_up_us = esp_timer_get_time();
+      last_forced_us = last_up_us;
     }
 
     const uint64_t now = esp_timer_get_time();
@@ -286,11 +292,14 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
 
     if (!esp_websocket_client_is_connected(client)) {
       // Auto-reconnect (reconnect_timeout_ms) handles routine drops. Once the
-      // client has been down past the stuck threshold, keep forcing a restart
-      // every supervise tick until it comes back — last_up_us stays put.
-      if (now - last_up_us >= cfg::ws_stuck_reconnect_us) {
+      // client has been down past the stuck threshold, force restarts — but
+      // spaced by the forced-retry interval, since stop() aborts an in-flight
+      // connect and a slow (DNS/roam) connect needs time to complete.
+      if (now - last_up_us >= cfg::ws_stuck_reconnect_us &&
+          now - last_forced_us >= cfg::ws_forced_retry_interval_us) {
         ESP_LOGW(TAG, "[ws] disconnected too long, forcing reconnect");
         websocket_force_reconnect(client);
+        last_forced_us = now;
       }
       continue;
     }
