@@ -49,12 +49,15 @@ RemoteWebViewClient/
   URI (`append_q_int_` skips `v < 0`) so server-side defaults apply — with one
   exception: `rotation_` defaults to `0`, not `-1`, so `r=0` is always sent
   even when `rotation` is absent from the YAML.
-- **Two FreeRTOS tasks** (`remote_webview.cpp`): `rwv_ws` (core 0) supervises
-  the connection — forces reconnects every 5s if dropped and sends a keepalive
-  every 60s; `rwv_decode` (core 1) drains `q_decode_` and does all JPEG
-  decoding and drawing. The WS event handler reassembles fragmented binary
-  messages into a PSRAM buffer (`WsReasm`) and queues a `WsMsg`; if the queue
-  is full the packet is dropped with a warning — the stream must never block.
+- **Two FreeRTOS tasks** (`remote_webview.cpp`): `rwv_ws` (core 0) drains the
+  outbound packet queue (`q_send_`: touch, frame stats), sends a keepalive
+  every 60s, and force-restarts the client only after 30s of continuous
+  disconnection (routine drops are the client library's auto-reconnect);
+  `rwv_decode` (core 1) drains `q_decode_` and does all JPEG decoding and
+  drawing. The WS event handler reassembles fragmented binary messages into
+  buffers recycled through a pre-allocated pool (`q_free_`, PSRAM-first) and
+  queues a `WsMsg`; when the decode queue is full the oldest queued packet is
+  evicted in favor of the newest — the stream must never block.
 - **Main-loop marshaling**: the decode task never touches ESPHome objects that
   aren't thread-safe. It sets atomics (`frame_update_pending_`,
   `url_publish_pending_` + `pending_url_` under `state_mtx_`), and `loop()`
@@ -142,12 +145,12 @@ and/or exercising the protocol through `web_client`.
 - Heap allocations prefer PSRAM and fall back to internal RAM:
   `heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)` then retry with
   `MALLOC_CAP_8BIT`.
-- The `ws_send_*` helpers guard on null client/mutex and connection state,
-  take `ws_send_mtx_` with a short `pdMS_TO_TICKS` timeout, and return
-  `false` on contention — sends must never block the decode task or main
-  loop. Follow that helper pattern for new sends; note
-  `process_frame_stats_packet_` predates it and inlines its send without the
-  null/connected guards.
+- Small fixed-size packets (touch, frame stats) go through
+  `queue_ws_packet_` and are sent by the WS task; the remaining direct
+  senders (`ws_send_keepalive_`, `ws_send_open_url_`) guard on null
+  client/mutex and connection state, take `ws_send_mtx_` with a short
+  `pdMS_TO_TICKS` timeout, and return `false` on contention — sends must
+  never block the decode task or main loop.
 - Compile-time tunables for **new code** go in `remote_webview_config.h`
   under `namespace cfg`, not as magic numbers in the .cpp. The existing .cpp
   still hardcodes several (task priorities, reconnect/send timeouts, the 5s
