@@ -10,6 +10,9 @@ inline constexpr int ws_task_prio = 5;
 inline constexpr int decode_queue_depth = 12;
 // Message-buffer pool: queue depth + one buffer being reassembled + one being decoded
 inline constexpr int msg_pool_extra = 2;
+// Without PSRAM the pool may take at most this many buffers from internal
+// RAM — WiFi/lwIP and task stacks need the rest of the heap.
+inline constexpr int msg_pool_max_internal_bufs = 2;
 
 inline constexpr size_t ws_max_message_bytes = 64 * 1024;
 inline constexpr size_t ws_buffer_size = 30 * 1024;

@@ -83,10 +83,15 @@ void RemoteWebView::setup() {
   const int pool_size = cfg::decode_queue_depth + cfg::msg_pool_extra;
   q_free_ = xQueueCreate(pool_size, sizeof(uint8_t *));
   int allocated = 0;
+  int internal_used = 0;
   for (int i = 0; i < pool_size; i++) {
     auto *b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!b) b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_8BIT);
-    if (!b) break;
+    if (!b) {
+      if (internal_used >= cfg::msg_pool_max_internal_bufs) break;
+      b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      if (!b) break;
+      internal_used++;
+    }
     xQueueSend(q_free_, &b, 0);
     allocated++;
   }
