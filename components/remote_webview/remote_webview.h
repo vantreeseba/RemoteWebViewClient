@@ -21,12 +21,8 @@
 #else
   #define REMOTE_WEBVIEW_HW_JPEG 0
 #endif
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-  #include "esp_cache.h"
-  #define REMOTE_WEBVIEW_HAS_CACHE_MSYNC 1
-#else
-  #define REMOTE_WEBVIEW_HAS_CACHE_MSYNC 0
-#endif
+// No manual cache msync is needed around the HW decoder: jpeg_decoder_process
+// syncs the input (C2M) and invalidates the output (M2C) itself.
 
 namespace esphome {
 namespace remote_webview {
@@ -114,6 +110,9 @@ class RemoteWebView : public Component {
   uint8_t *hw_decode_output_buf_{nullptr};
   size_t hw_decode_input_size_{0};
   size_t hw_decode_output_size_{0};
+  // Fallback conditions are per-config and repeat every frame — warn once.
+  bool hw_warned_unaligned_{false};
+  bool hw_warned_tile_size_{false};
 #endif
 
   uint64_t last_move_us_{0};
@@ -123,9 +122,10 @@ class RemoteWebView : public Component {
   uint32_t frame_id_{0xffffffffu};
   uint16_t frame_tiles_{0};
   size_t   frame_bytes_{0};
-  uint32_t frame_stats_time_{0};
+  // 64-bit: these accumulate until the server polls stats, which may be never.
+  uint64_t frame_stats_time_{0};
   uint32_t frame_stats_count_{0};
-  size_t   frame_stats_bytes_{0};
+  uint64_t frame_stats_bytes_{0};
 
   QueueHandle_t     q_decode_{nullptr};
   QueueHandle_t     q_free_{nullptr};

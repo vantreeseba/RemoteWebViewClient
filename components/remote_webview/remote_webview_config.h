@@ -4,7 +4,10 @@ namespace esphome {
 namespace remote_webview {
 namespace cfg {
 
-inline constexpr int decode_task_stack = 32 * 1024;
+// Task stacks live in internal DRAM. JPEGDEC keeps its ~25 KB state in the
+// heap-allocated jd_ member, not on the stack, so 16 KB is ample — verify
+// with uxTaskGetStackHighWaterMark if the decode path grows.
+inline constexpr int decode_task_stack = 16 * 1024;
 inline constexpr int ws_task_stack = 8 * 1024;
 inline constexpr int ws_task_prio = 5;
 // Must hold one full frame's burst: ceil(max full-frame bytes / mbpm) + slack.

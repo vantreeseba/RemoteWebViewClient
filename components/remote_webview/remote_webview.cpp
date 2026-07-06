@@ -578,11 +578,15 @@ void RemoteWebView::process_frame_stats_packet_(const uint8_t *data, size_t len)
 {
   uint32_t avg_render_time = 0;
   if (frame_stats_count_ > 0)
-    avg_render_time = frame_stats_time_ / frame_stats_count_;
+    avg_render_time = (uint32_t) (frame_stats_time_ / frame_stats_count_);
 
-  ESP_LOGD(TAG, "sending frame stats: avg_time=%u ms, bytes=%u", (unsigned)avg_render_time, (unsigned)frame_stats_bytes_);
+  // The wire field is u32; clamp instead of silently truncating.
+  const uint32_t bytes32 =
+      frame_stats_bytes_ > UINT32_MAX ? UINT32_MAX : (uint32_t) frame_stats_bytes_;
+
+  ESP_LOGD(TAG, "sending frame stats: avg_time=%u ms, bytes=%u", (unsigned)avg_render_time, (unsigned)bytes32);
   uint8_t pkt[sizeof(proto::FrameStatsPacket)];
-  const size_t n = proto::build_frame_stats_packet(avg_render_time, frame_stats_bytes_, pkt);
+  const size_t n = proto::build_frame_stats_packet(avg_render_time, bytes32, pkt);
 
   frame_stats_time_ = 0;
   frame_stats_count_ = 0;
@@ -608,12 +612,19 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
     const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
 
     if (aligned_w != (int)hdr.width) {
-      ESP_LOGW(TAG, "jpeg dimensions not aligned: %u x %u", (unsigned)hdr.width, (unsigned)hdr.height);
+      if (!hw_warned_unaligned_) {
+        hw_warned_unaligned_ = true;
+        ESP_LOGW(TAG, "jpeg dimensions not 16-aligned (%u x %u): such tiles use software decode every frame — align display width/tile_size for full HW decode",
+                 (unsigned)hdr.width, (unsigned)hdr.height);
+      }
       return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
-    
+
     if (len > hw_decode_input_size_ || out_sz > hw_decode_output_size_) {
-      ESP_LOGW(TAG, "tile too large for HW decoder buffers");
+      if (!hw_warned_tile_size_) {
+        hw_warned_tile_size_ = true;
+        ESP_LOGW(TAG, "tile too large for HW decoder buffers, using software decode");
+      }
       return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
 
