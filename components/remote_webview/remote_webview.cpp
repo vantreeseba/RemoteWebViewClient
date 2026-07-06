@@ -239,6 +239,7 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
   ESP_ERROR_CHECK(esp_websocket_client_start(client));
 
   uint64_t last_supervise_us = esp_timer_get_time();
+  uint64_t last_up_us = esp_timer_get_time();
   for (;;) {
     OutMsg m;
     if (xQueueReceive(self->q_send_, &m, pdMS_TO_TICKS(250)) == pdTRUE) {
@@ -258,9 +259,16 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
     last_supervise_us = now;
 
     if (!esp_websocket_client_is_connected(client)) {
-      websocket_force_reconnect(client);
+      // Auto-reconnect (reconnect_timeout_ms) handles routine drops; only
+      // force a stop/start if the client has been wedged for a long time.
+      if (now - last_up_us >= cfg::ws_stuck_reconnect_us) {
+        ESP_LOGW(TAG, "[ws] disconnected too long, forcing reconnect");
+        websocket_force_reconnect(client);
+        last_up_us = now;
+      }
       continue;
     }
+    last_up_us = now;
 
     if (self->ws_client_ && esp_websocket_client_is_connected(self->ws_client_)) {
       if (now - self->last_keepalive_us_ >= cfg::ws_keepalive_interval_us) {
@@ -315,18 +323,16 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
     case WEBSOCKET_EVENT_DISCONNECTED:
       if (self_) self_->ws_client_ = nullptr;
       ESP_LOGI(TAG, "[ws] disconnected");
-      if (self_) self_->last_keepalive_us_ = 0; 
+      if (self_) self_->last_keepalive_us_ = 0;
       reasm_reset_(*r);
-      websocket_force_reconnect(e->client);
       break;
 
 #ifdef WEBSOCKET_EVENT_CLOSED
     case WEBSOCKET_EVENT_CLOSED:
       if (self_) self_->ws_client_ = nullptr;
       ESP_LOGI(TAG, "[ws] closed");
-      if (self_) self_->last_keepalive_us_ = 0; 
+      if (self_) self_->last_keepalive_us_ = 0;
       reasm_reset_(*r);
-      websocket_force_reconnect(e->client);
       break;
 #endif
 

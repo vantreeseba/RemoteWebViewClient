@@ -15,6 +15,9 @@ inline constexpr size_t ws_max_message_bytes = 64 * 1024;
 inline constexpr size_t ws_buffer_size = 30 * 1024;
 inline constexpr size_t ws_keepalive_interval_us = 60 * 1000 * 1000;
 inline constexpr uint32_t ws_supervise_interval_us = 5 * 1000 * 1000;
+// Watchdog: force a client restart only after auto-reconnect has been
+// down this long — routine reconnects are the client library's job.
+inline constexpr uint64_t ws_stuck_reconnect_us = 30ull * 1000 * 1000;
 
 // Outbound queue for small fixed-size packets (touch, frame stats),
 // drained by the WS task so producers never block on the socket.
