@@ -161,7 +161,8 @@ async def to_code(config):
     # IDF dependencies here instead of requiring every device YAML to list
     # them under esp32.framework.components (YAML declarations are applied at
     # FINAL priority and still override these, so pinned configs keep working).
-    if CORE.using_esp_idf:
+    # Note: CORE.using_esp_idf was removed in ESPHome 2026.6.
+    if CORE.is_esp32 and not CORE.using_arduino:
         from esphome.components.esp32 import add_idf_component
 
         add_idf_component(name="espressif/esp_websocket_client", ref="1.5.0")
