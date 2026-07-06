@@ -125,11 +125,13 @@ void RemoteWebView::setup() {
     const int aligned_h = (H + 15) & ~15;
     
     const size_t max_buffer_size = (size_t)aligned_w * (size_t)aligned_h * 2u;
-    
+
     jpeg_decode_memory_alloc_cfg_t in_cfg { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     jpeg_decode_memory_alloc_cfg_t out_cfg { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
-    
-    hw_decode_input_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &in_cfg, &hw_decode_input_size_);
+
+    // Input holds compressed data only, bounded by the WS message size —
+    // sizing it like the RGB565 output wasted ~20x the needed DMA memory.
+    hw_decode_input_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)reasm_buf_size_, &in_cfg, &hw_decode_input_size_);
     hw_decode_output_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &out_cfg, &hw_decode_output_size_);
     
     if (!hw_decode_input_buf_ || !hw_decode_output_buf_) {
