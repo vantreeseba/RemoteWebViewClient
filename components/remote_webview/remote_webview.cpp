@@ -78,6 +78,23 @@ void RemoteWebView::setup() {
   ws_send_mtx_ = xSemaphoreCreateMutex();
   state_mtx_ = xSemaphoreCreateMutex();
 
+  reasm_buf_size_ = (max_bytes_per_msg_ > 0) ? (size_t) max_bytes_per_msg_ : cfg::ws_max_message_bytes;
+  const int pool_size = cfg::decode_queue_depth + cfg::msg_pool_extra;
+  q_free_ = xQueueCreate(pool_size, sizeof(uint8_t *));
+  int allocated = 0;
+  for (int i = 0; i < pool_size; i++) {
+    auto *b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!b) b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_8BIT);
+    if (!b) break;
+    xQueueSend(q_free_, &b, 0);
+    allocated++;
+  }
+  if (allocated < pool_size)
+    ESP_LOGW(TAG, "allocated %d/%d message buffers (%u bytes each)", allocated, pool_size,
+             (unsigned) reasm_buf_size_);
+  if (allocated == 0)
+    ESP_LOGE(TAG, "no message buffers available, streaming disabled");
+
   start_decode_task_();
   start_ws_task_();
 
@@ -241,8 +258,19 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
 }
 
 void RemoteWebView::reasm_reset_(WsReasm &r) {
-  if (r.buf) free(r.buf);
+  if (r.buf && self_) self_->release_msg_buf_(r.buf);
   r.buf = nullptr; r.total = 0; r.filled = 0;
+}
+
+uint8_t *RemoteWebView::acquire_msg_buf_() {
+  uint8_t *b = nullptr;
+  if (!q_free_ || xQueueReceive(q_free_, &b, 0) != pdTRUE) return nullptr;
+  return b;
+}
+
+void RemoteWebView::release_msg_buf_(uint8_t *buf) {
+  if (!buf) return;
+  if (!q_free_ || xQueueSend(q_free_, &buf, 0) != pdTRUE) free(buf);
 }
 
 void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32_t event_id, void *event_data) {
@@ -288,17 +316,14 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
 
       if (e->payload_offset == 0) {
         reasm_reset_(*r);
-        const size_t max_allowed = (self_ && self_->max_bytes_per_msg_ > 0) 
-                                   ? (size_t)self_->max_bytes_per_msg_ 
-                                   : cfg::ws_max_message_bytes;
+        const size_t max_allowed = self_->reasm_buf_size_;
         if ((size_t)e->payload_len > max_allowed) {
           ESP_LOGE(TAG, "WS message too large: %u > %u", (unsigned)e->payload_len, (unsigned)max_allowed);
           break;
         }
+        r->buf = self_->acquire_msg_buf_();
+        if (!r->buf) { ESP_LOGW(TAG, "no free message buffers, dropping message"); break; }
         r->total = (size_t)e->payload_len;
-        r->buf   = (uint8_t *)heap_caps_malloc(r->total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!r->buf) r->buf = (uint8_t *)heap_caps_malloc(r->total, MALLOC_CAP_8BIT);
-        if (!r->buf) { ESP_LOGE(TAG, "malloc %u failed", (unsigned)r->total); r->total = 0; break; }
       }
       if (!r->buf || r->total == 0) break;
 
@@ -317,7 +342,7 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
         r->buf = nullptr; r->total = 0; r->filled = 0;
         if (!self_->q_decode_ || xQueueSend(self_->q_decode_, &m, 0) != pdTRUE) {
           ESP_LOGW(TAG, "decode queue full, dropping packet");
-          free(m.buf);
+          self_->release_msg_buf_(m.buf);
         }
       }
       break;
@@ -344,7 +369,7 @@ void RemoteWebView::decode_task_tramp_(void *arg) {
   for (;;) {
     if (xQueueReceive(self->q_decode_, &m, portMAX_DELAY) == pdTRUE) {
       self->process_packet_(m.client, m.buf, m.len);
-      free(m.buf);
+      self->release_msg_buf_(m.buf);
     }
   }
 }

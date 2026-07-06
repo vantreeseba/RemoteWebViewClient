@@ -120,6 +120,8 @@ class RemoteWebView : public Component {
   size_t   frame_stats_bytes_{0};
 
   QueueHandle_t     q_decode_{nullptr};
+  QueueHandle_t     q_free_{nullptr};
+  size_t            reasm_buf_size_{0};
   SemaphoreHandle_t ws_send_mtx_{nullptr};
   TaskHandle_t      t_ws_{nullptr};
   TaskHandle_t      t_decode_{nullptr};
@@ -141,6 +143,8 @@ class RemoteWebView : public Component {
 
   static void ws_event_handler_(void *handler_arg, esp_event_base_t base, int32_t event_id, void *event_data);
   static void reasm_reset_(WsReasm &r);
+  uint8_t *acquire_msg_buf_();
+  void release_msg_buf_(uint8_t *buf);
 
   void process_packet_(void *client, const uint8_t *data, size_t len);
   void process_frame_packet_(const uint8_t *data, size_t len);
