@@ -91,23 +91,28 @@ void RemoteWebView::setup() {
   const int pool_size = cfg::decode_queue_depth + cfg::msg_pool_extra;
   q_free_ = xQueueCreate(pool_size, sizeof(uint8_t *));
   int allocated = 0;
-  int internal_used = 0;
+  size_t internal_bytes = 0;
   for (int i = 0; i < pool_size; i++) {
     auto *b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!b) {
-      if (internal_used >= cfg::msg_pool_max_internal_bufs) break;
+      if (internal_bytes + reasm_buf_size_ > cfg::msg_pool_max_internal_bytes) break;
       b = (uint8_t *) heap_caps_malloc(reasm_buf_size_, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
       if (!b) break;
-      internal_used++;
+      internal_bytes += reasm_buf_size_;
     }
     xQueueSend(q_free_, &b, 0);
     allocated++;
   }
   if (allocated < pool_size)
-    ESP_LOGW(TAG, "allocated %d/%d message buffers (%u bytes each)", allocated, pool_size,
-             (unsigned) reasm_buf_size_);
+    // Fewer than (queue depth + 2) buffers means multi-message frames will
+    // drop packets and leave stale tiles — this is a degraded mode, not a
+    // cosmetic warning.
+    ESP_LOGW(TAG,
+             "allocated %d/%d message buffers (%u bytes each) — expect dropped "
+             "frames; add PSRAM or lower max_bytes_per_msg",
+             allocated, pool_size, (unsigned) reasm_buf_size_);
   if (allocated == 0)
-    ESP_LOGE(TAG, "no message buffers available, streaming disabled");
+    ESP_LOGE(TAG, "no message buffers available, streaming disabled (no PSRAM? lower max_bytes_per_msg)");
 
   start_decode_task_();
   start_ws_task_();
