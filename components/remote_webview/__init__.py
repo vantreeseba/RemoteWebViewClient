@@ -2,6 +2,7 @@ import inspect
 import re
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.core import CORE
 from esphome import automation
 from esphome.components import display, touchscreen, text_sensor
 from esphome.components.display import validate_rotation
@@ -154,3 +155,17 @@ async def to_code(config):
     if CONF_CURRENT_URL_SENSOR in config:
         sens = await text_sensor.new_text_sensor(config[CONF_CURRENT_URL_SENSOR])
         cg.add(var.set_url_sensor(sens))
+
+    # ESPHome only copies source files from external components, so the
+    # in-tree idf_component.yml is never consumed by the build. Register the
+    # IDF dependencies here instead of requiring every device YAML to list
+    # them under esp32.framework.components (YAML declarations are applied at
+    # FINAL priority and still override these, so pinned configs keep working).
+    if CORE.using_esp_idf:
+        from esphome.components.esp32 import add_idf_component
+
+        add_idf_component(name="espressif/esp_websocket_client", ref="1.5.0")
+        add_idf_component(
+            name="bitbank2/jpegdec",
+            repo="https://github.com/strange-v/jpegdec-esphome",
+        )
