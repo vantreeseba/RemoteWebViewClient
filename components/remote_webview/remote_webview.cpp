@@ -292,11 +292,17 @@ void RemoteWebView::ws_task_tramp_(void *arg) {
   }
 }
 
-bool RemoteWebView::queue_ws_packet_(const uint8_t *pkt, size_t len) {
+bool RemoteWebView::queue_ws_packet_(const uint8_t *pkt, size_t len, bool evict_on_full) {
   if (!q_send_ || !pkt || len == 0 || len > cfg::send_msg_max_bytes) return false;
   OutMsg m;
   m.len = (uint8_t) len;
   memcpy(m.buf, pkt, len);
+  if (xQueueSend(q_send_, &m, 0) == pdTRUE) return true;
+  if (!evict_on_full) return false;
+  // Make room for packets that must not be lost (touch Down/Up) by
+  // shedding the oldest queued packet — typically a stale Move.
+  OutMsg discarded;
+  xQueueReceive(q_send_, &discarded, 0);
   return xQueueSend(q_send_, &m, 0) == pdTRUE;
 }
 
@@ -623,7 +629,10 @@ bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, ui
   const size_t n = proto::build_touch_packet(type, pid, x, y, pkt);
 
   // Queued for the WS task — a slow socket must never stall the main loop.
-  return queue_ws_packet_(pkt, n);
+  // Down/Up evict a stale queued packet rather than be dropped: losing an
+  // Up leaves the remote page stuck in a phantom drag.
+  const bool must_deliver = (type != proto::TouchType::Move);
+  return queue_ws_packet_(pkt, n, must_deliver);
 }
 
 bool RemoteWebView::ws_send_open_url_(const char *url, uint16_t flags) {
