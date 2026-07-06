@@ -340,9 +340,20 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
         WsMsg m;
         m.buf = r->buf; m.len = r->total; m.client = e->client;
         r->buf = nullptr; r->total = 0; r->filled = 0;
-        if (!self_->q_decode_ || xQueueSend(self_->q_decode_, &m, 0) != pdTRUE) {
-          ESP_LOGW(TAG, "decode queue full, dropping packet");
+        if (!self_->q_decode_) {
           self_->release_msg_buf_(m.buf);
+        } else if (xQueueSend(self_->q_decode_, &m, 0) != pdTRUE) {
+          // Queue full: evict the oldest queued packet — stale tiles are worth
+          // less than the newest ones, which the next frame builds on.
+          WsMsg oldest;
+          if (xQueueReceive(self_->q_decode_, &oldest, 0) == pdTRUE)
+            self_->release_msg_buf_(oldest.buf);
+          if (xQueueSend(self_->q_decode_, &m, 0) == pdTRUE) {
+            ESP_LOGW(TAG, "decode queue full, dropped oldest packet");
+          } else {
+            ESP_LOGW(TAG, "decode queue full, dropping packet");
+            self_->release_msg_buf_(m.buf);
+          }
         }
       }
       break;
