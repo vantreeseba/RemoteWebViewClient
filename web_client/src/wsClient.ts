@@ -218,17 +218,22 @@ export class RemoteWebViewBrowserClient {
       }
 
       const tiles = parsed.tiles.filter((tile) => tile.w > 0 && tile.h > 0);
-      try {
-        // Decode all tiles concurrently, then draw in packet order.
-        const bitmaps = await Promise.all(tiles.map((tile) => this.renderer.decodeJpegTile(tile.data)));
-        bitmaps.forEach((bitmap, i) => {
+      // Decode all tiles concurrently, then draw in packet order. allSettled
+      // so one corrupt tile neither discards its siblings nor leaks their
+      // decoded bitmaps (drawBitmap closes each one).
+      const results = await Promise.allSettled(tiles.map((tile) => this.renderer.decodeJpegTile(tile.data)));
+      let failed = 0;
+      results.forEach((result, i) => {
+        if (result.status === "fulfilled") {
           const tile = tiles[i];
-          this.renderer.drawBitmap(bitmap, tile.x, tile.y, tile.w, tile.h);
-        });
-      } catch {
-        this.lastError = "tile decode failed";
+          this.renderer.drawBitmap(result.value, tile.x, tile.y, tile.w, tile.h);
+        } else {
+          failed += 1;
+        }
+      });
+      if (failed > 0) {
+        this.lastError = `tile decode failed (${failed}/${tiles.length})`;
         this.pushMetrics("warning");
-        return;
       }
 
       if (parsed.header.flags & FLAG_LAST_OF_FRAME) {
