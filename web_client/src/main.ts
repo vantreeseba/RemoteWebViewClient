@@ -162,6 +162,13 @@ elScale.addEventListener("change", () => {
 
 elDisconnect.addEventListener("click", () => {
   client.disconnect();
+  // A metrics rAF scheduled before the click would otherwise fire after us
+  // and overwrite the disconnected status with stale connected-state text.
+  if (metricsRafId !== null) {
+    cancelAnimationFrame(metricsRafId);
+    metricsRafId = null;
+  }
+  latestMetrics = null;
   elMetrics.textContent = "status: disconnected";
 });
 
