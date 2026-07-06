@@ -74,7 +74,9 @@ export class RemoteWebViewBrowserClient {
     this.ws = ws;
 
     ws.onopen = () => {
-      this.reconnectDelayMs = 1000;
+      // Backoff is NOT reset here: a server that accepts the handshake and
+      // immediately drops would otherwise be hammered at 1 s forever. It
+      // resets when the first frame actually arrives.
       this.startKeepalive();
       this.pushMetrics("connected");
     };
@@ -227,6 +229,9 @@ export class RemoteWebViewBrowserClient {
         this.pushMetrics("warning");
         return;
       }
+
+      // A real frame proves the connection is healthy — reset the backoff.
+      this.reconnectDelayMs = 1000;
 
       const tiles = parsed.tiles.filter((tile) => tile.w > 0 && tile.h > 0);
       // Decode all tiles concurrently, then draw in packet order. allSettled
