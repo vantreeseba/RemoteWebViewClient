@@ -55,7 +55,7 @@ export type TileInfo = {
   w: number;
   h: number;
   dlen: number;
-  data: Uint8Array;
+  data: Uint8Array<ArrayBuffer>;
 };
 
 export type ParsedFrame = {
