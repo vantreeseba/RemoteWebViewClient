@@ -51,8 +51,10 @@ RemoteWebViewClient/
   even when `rotation` is absent from the YAML.
 - **Two FreeRTOS tasks** (`remote_webview.cpp`): `rwv_ws` (core 0) drains the
   outbound packet queue (`q_send_`: touch, frame stats), sends a keepalive
-  every 60s, and force-restarts the client only after 30s of continuous
-  disconnection (routine drops are the client library's auto-reconnect);
+  every 60s, restarts the client promptly when the server closes cleanly
+  (the CLOSED handler sets a flag — never call stop() from the event task),
+  and otherwise force-restarts only after 30s of continuous disconnection
+  (routine drops are the client library's auto-reconnect);
   `rwv_decode` (core 1) drains `q_decode_` and does all JPEG decoding and
   drawing. The WS event handler reassembles fragmented binary messages into
   buffers recycled through a pre-allocated pool (`q_free_`, PSRAM-first) and
