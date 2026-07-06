@@ -729,6 +729,24 @@ bool RemoteWebView::ws_send_keepalive_() {
   return r == (int)n;
 }
 
+RemoteWebViewTouchListener::PointerSlot *RemoteWebViewTouchListener::find_slot_(uint8_t id) {
+  for (auto &slot : pointers_)
+    if (slot.active && slot.id == id) return &slot;
+  return nullptr;
+}
+
+RemoteWebViewTouchListener::PointerSlot *RemoteWebViewTouchListener::claim_slot_(uint8_t id) {
+  if (auto *slot = find_slot_(id)) return slot;
+  for (auto &slot : pointers_) {
+    if (!slot.active) {
+      slot.active = true;
+      slot.id = id;
+      return slot;
+    }
+  }
+  return nullptr;
+}
+
 void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
   if (!parent_) return;
 
@@ -737,36 +755,60 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
     // STATE_RELEASING is a flag OR'd into the state (e.g. PRESSED|RELEASING),
     // so it must be tested as a bit, never as a switch case.
     if (p.state & touchscreen::STATE_RELEASING) {
-      parent_->ws_send_touch_event_(proto::TouchType::Up, p.x, p.y, p.id);
-      up_sent_ = true;
+      // On send failure the slot stays active so the absence check below or
+      // release() retries the Up — a lost Up is a phantom drag server-side.
+      if (parent_->ws_send_touch_event_(proto::TouchType::Up, p.x, p.y, p.id)) {
+        if (auto *slot = find_slot_(p.id)) slot->active = false;
+      }
       continue;
     }
     switch (p.state) {
       case touchscreen::STATE_PRESSED:
-        parent_->ws_send_touch_event_(proto::TouchType::Down, p.x, p.y, p.id);
-        last_x_ = p.x; last_y_ = p.y; last_id_ = p.id;
-        up_sent_ = false;
-        break;
-      case touchscreen::STATE_UPDATED:
-        if (!RemoteWebView::kCoalesceMoves || RemoteWebView::kMoveIntervalUs == 0 ||
-            (now - parent_->last_move_us_) >= RemoteWebView::kMoveIntervalUs) {
+      case touchscreen::STATE_UPDATED: {
+        if (p.state == touchscreen::STATE_PRESSED) {
+          parent_->ws_send_touch_event_(proto::TouchType::Down, p.x, p.y, p.id);
+        } else if (!RemoteWebView::kCoalesceMoves || RemoteWebView::kMoveIntervalUs == 0 ||
+                   (now - parent_->last_move_us_) >= RemoteWebView::kMoveIntervalUs) {
           parent_->last_move_us_ = now;
           parent_->ws_send_touch_event_(proto::TouchType::Move, p.x, p.y, p.id);
         }
-        last_x_ = p.x; last_y_ = p.y; last_id_ = p.id;
+        if (auto *slot = claim_slot_(p.id)) {
+          slot->x = p.x;
+          slot->y = p.y;
+        }
         break;
+      }
       default: break;
     }
+  }
+
+  // A tracked pointer absent from this update was lifted without a RELEASING
+  // delivery — ESPHome skips the notification when the remaining fingers'
+  // coordinates didn't change. Lift it at its last known position.
+  for (auto &slot : pointers_) {
+    if (!slot.active) continue;
+    bool present = false;
+    for (auto &p : pts) {
+      if (p.id == slot.id) {
+        present = true;
+        break;
+      }
+    }
+    if (!present && parent_->ws_send_touch_event_(proto::TouchType::Up, slot.x, slot.y, slot.id))
+      slot.active = false;
   }
 }
 
 void RemoteWebViewTouchListener::release() {
-  if (!parent_ || up_sent_) return;
+  if (!parent_) return;
 
-  // Fallback if no RELEASING point was delivered: lift at the last known
-  // position, not (0,0) — the server maps Up to a click/drag-end location.
-  parent_->ws_send_touch_event_(proto::TouchType::Up, last_x_, last_y_, last_id_);
-  up_sent_ = true;
+  // All pointers are up: send Up for every one still tracked, each at its
+  // last known position.
+  for (auto &slot : pointers_) {
+    if (!slot.active) continue;
+    parent_->ws_send_touch_event_(proto::TouchType::Up, slot.x, slot.y, slot.id);
+    slot.active = false;
+  }
 }
 
 void RemoteWebViewTouchListener::touch(touchscreen::TouchPoint tp) {

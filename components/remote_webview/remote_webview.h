@@ -191,11 +191,19 @@ class RemoteWebViewTouchListener : public touchscreen::TouchListener {
   void update(const touchscreen::TouchPoints_t &pts) override;
   void release() override;
  private:
+  // Per-pointer state: ESPHome may lift one finger without delivering an
+  // update (coords of the remaining finger unchanged), so each pointer's
+  // last position and down/up state must be tracked individually.
+  static constexpr int kMaxPointers = 5;
+  struct PointerSlot {
+    bool active{false};
+    uint8_t id{0};
+    int16_t x{0}, y{0};
+  };
+  PointerSlot *find_slot_(uint8_t id);
+  PointerSlot *claim_slot_(uint8_t id);
   RemoteWebView *parent_{nullptr};
-  // Last reported point, so release() can send Up at the lift position.
-  int16_t last_x_{0}, last_y_{0};
-  uint8_t last_id_{0};
-  bool up_sent_{true};
+  PointerSlot pointers_[kMaxPointers];
 };
 
 }  // namespace remote_webview
