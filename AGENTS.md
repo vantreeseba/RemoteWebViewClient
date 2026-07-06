@@ -32,7 +32,7 @@ RemoteWebViewClient/
 │   ├── protocol.h                # Binary protocol v1: packed structs, parse/build helpers
 │   ├── automation.h              # on_frame_update trigger + trigger_on_frame_update action
 │   ├── remote_webview_config.h   # Compile-time tunables (task stacks, queue depth, move coalescing)
-│   └── idf_component.yml         # IDF deps: esp_websocket_client, esp-dsp, jpegdec (+P4-only jpeg/mm)
+│   └── idf_component.yml         # Legacy manifest — NOT consumed by ESPHome builds (deps live in __init__.py)
 ├── web_client/                   # Browser test client (Vite + TS): protocol.ts, wsClient.ts, canvasRenderer.ts
 ├── examples/                     # ESPHome YAML automation examples (dimmer, URL recovery, inactivity)
 └── README.md                     # Full device YAML example + Supported Parameters table
@@ -104,11 +104,14 @@ esphome compile your-device.yaml
 #     components: [ remote_webview ]
 ```
 
-The device YAML must register the framework components the README shows:
-`espressif/esp_websocket_client` and the `strange-v/jpegdec-esphome` fork of
-`bitbank2/jpegdec`. `idf_component.yml` additionally pulls `esp-dsp`, and on
-ESP32-P4 only, `esp_driver_jpeg` + `esp_mm`. Set `url: "self-test"` in the
-`remote_webview:` block to run the server's render-time self-test.
+IDF dependencies (`espressif/esp_websocket_client`, the
+`strange-v/jpegdec-esphome` fork of `bitbank2/jpegdec`) are registered from
+`__init__.py` via `esp32.add_idf_component` — device YAMLs no longer need a
+`framework: components:` block, though one still overrides the registered
+versions (YAML declarations apply at FINAL priority). The in-tree
+`idf_component.yml` is NOT read by ESPHome (only source files are copied
+into the build) — don't add dependencies there. Set `url: "self-test"` in
+the `remote_webview:` block to run the server's render-time self-test.
 
 ```bash
 # Browser test client (no hardware needed)
