@@ -1,3 +1,4 @@
+import inspect
 import re
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -90,10 +91,19 @@ REMOTEWEBVIEW_ACTION_SCHEMA = cv.Schema(
     }
 )
 
+# play() fires the trigger inline and returns; play_next_ is never deferred,
+# so the action is synchronous. Older ESPHome versions don't accept the kwarg.
+_ACTION_KWARGS = (
+    {"synchronous": True}
+    if "synchronous" in inspect.signature(automation.register_action).parameters
+    else {}
+)
+
 @automation.register_action(
     "remote_webview.trigger_on_frame_update",
     TriggerOnFrameUpdateAction,
     REMOTEWEBVIEW_ACTION_SCHEMA,
+    **_ACTION_KWARGS,
 )
 
 async def remote_webview_trigger_on_frame_update_to_code(config, action_id, template_arg, args):
