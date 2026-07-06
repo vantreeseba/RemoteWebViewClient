@@ -488,12 +488,9 @@ void RemoteWebView::process_frame_stats_packet_(const uint8_t *data, size_t len)
   frame_stats_count_ = 0;
   frame_stats_bytes_ = 0;
 
-  const TickType_t to = pdMS_TO_TICKS(50);
-  if (xSemaphoreTake(ws_send_mtx_, to) != pdTRUE)
-    return;
-
-  esp_websocket_client_send_bin(ws_client_, (const char*)pkt, (int)n, to);
-  xSemaphoreGive(ws_send_mtx_);
+  // Queued for the WS task — a synchronous send here would stall tile decoding.
+  if (!queue_ws_packet_(pkt, n))
+    ESP_LOGW(TAG, "send queue full, dropping frame stats");
 }
 
 bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len) {
