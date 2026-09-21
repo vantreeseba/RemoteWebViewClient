@@ -462,14 +462,14 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
               // The whole queue is this frame: depth is too small for the
               // frame's message count. Keep the older tiles, drop the newest.
               xQueueSendToFront(self_->q_decode_, &oldest, 0);
-              ESP_LOGW(TAG, "decode queue full mid-frame, dropping packet (raise decode_queue_depth or max_bytes_per_msg)");
+              ESP_LOGE(TAG, "decode queue full mid-frame, dropping packet (raise decode_queue_depth or max_bytes_per_msg)");
               self_->release_msg_buf_(m.buf);
             } else {
               self_->release_msg_buf_(oldest.buf);
               if (xQueueSend(self_->q_decode_, &m, 0) == pdTRUE) {
-                ESP_LOGW(TAG, "decode queue full, dropped oldest packet");
+                ESP_LOGE(TAG, "decode queue full, dropped oldest packet");
               } else {
-                ESP_LOGW(TAG, "decode queue full, dropping packet");
+                ESP_LOGE(TAG, "decode queue full, dropping packet");
                 self_->release_msg_buf_(m.buf);
               }
             }
