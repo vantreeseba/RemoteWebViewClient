@@ -6,6 +6,7 @@ from esphome.core import CORE
 from esphome import automation
 from esphome.components import display, touchscreen, text_sensor
 from esphome.components.display import validate_rotation
+from esphome.components.esp32 import add_idf_sdkconfig_option
 from esphome.const import CONF_ID, CONF_DISPLAY_ID, CONF_URL, CONF_ROTATION, CONF_TRIGGER_ID
 
 
@@ -21,6 +22,10 @@ CONF_MIN_FRAME_INTERVAL = "min_frame_interval"
 CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_MAX_BYTES_PER_MSG = "max_bytes_per_msg"
 CONF_BIG_ENDIAN = "big_endian"
+CONF_HW_DECODE = "hw_decode"
+CONF_HW_DECODE_TIMEOUT_MS = "hw_decode_timeout_ms"
+CONF_STATS_INTERVAL = "stats_interval"
+CONF_SCALE = "scale"
 
 CONF_ON_FRAME_UPDATE = "on_frame_update"
 CONF_CURRENT_URL_SENSOR = "current_url_sensor"
@@ -75,7 +80,11 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_JPEG_QUALITY): cv.int_,
         cv.Optional(CONF_MAX_BYTES_PER_MSG): cv.int_,
         cv.Optional(CONF_BIG_ENDIAN): cv.boolean,
+        cv.Optional(CONF_HW_DECODE): cv.boolean,
+        cv.Optional(CONF_HW_DECODE_TIMEOUT_MS): cv.positive_int,
+        cv.Optional(CONF_STATS_INTERVAL): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_ROTATION): validate_rotation,
+        cv.Optional(CONF_SCALE): cv.float_range(min=0.5, max=4.0),
         cv.Optional(CONF_ON_FRAME_UPDATE): automation.validate_automation(
             {
                 cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(OnFrameUpdateTrigger),
@@ -143,10 +152,23 @@ async def to_code(config):
         cg.add(var.set_max_bytes_per_msg(config[CONF_MAX_BYTES_PER_MSG]))
     if CONF_BIG_ENDIAN in config:
         cg.add(var.set_big_endian(config[CONF_BIG_ENDIAN]))
+    if CONF_HW_DECODE in config:
+        cg.add(var.set_hw_decode(config[CONF_HW_DECODE]))
+    if CONF_HW_DECODE_TIMEOUT_MS in config:
+        cg.add(var.set_hw_decode_timeout_ms(config[CONF_HW_DECODE_TIMEOUT_MS]))
+    if CONF_STATS_INTERVAL in config:
+        cg.add(var.set_stats_interval(config[CONF_STATS_INTERVAL].total_milliseconds))
     if CONF_ROTATION in config:
         cg.add(var.set_rotation(config[CONF_ROTATION]))
+    if CONF_SCALE in config:
+        cg.add(var.set_scale(config[CONF_SCALE]))
 
     await cg.register_component(var, config)
+
+    # Newer esp_websocket_client versions run the DATA handler under the client lock, and the
+    # handler may wait up to 1 s for space in the decode queue. A separate TX lock keeps
+    # FrameAck, touch and keepalive sends from waiting on that.
+    add_idf_sdkconfig_option("CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK", True)
 
     for conf in config.get(CONF_ON_FRAME_UPDATE, []):
         trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
