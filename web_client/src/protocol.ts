@@ -8,7 +8,9 @@ export enum MsgType {
   FrameStats = 3,
   OpenURL = 4,
   Keepalive = 5,
-  CurrentURL = 6
+  CurrentURL = 6,
+  RequestFullFrame = 7,
+  FrameAck = 8
 }
 
 export enum Encoding {
@@ -210,6 +212,17 @@ export function buildKeepalivePacket(): Uint8Array {
   const out = new Uint8Array(2);
   out[0] = MsgType.Keepalive;
   out[1] = PROTOCOL_VERSION;
+  return out;
+}
+
+// [type:1][ver:1][frame_id:4] => 6 bytes
+// Cumulative: acknowledges every frame up to frameId so the server can pace frames.
+export function buildFrameAckPacket(frameId: number): Uint8Array {
+  const out = new Uint8Array(6);
+  const view = new DataView(out.buffer);
+  view.setUint8(0, MsgType.FrameAck);
+  view.setUint8(1, PROTOCOL_VERSION);
+  view.setUint32(2, frameId >>> 0, true);
   return out;
 }
 

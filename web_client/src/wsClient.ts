@@ -1,10 +1,12 @@
 import {
+  buildFrameAckPacket,
   buildKeepalivePacket,
   buildOpenUrlPacket,
   buildTouchPacket,
   buildWsUri,
   Encoding,
   FLAG_LAST_OF_FRAME,
+  FrameInfo,
   frameIdOf,
   MsgType,
   parseFramePacket,
@@ -236,6 +238,18 @@ export class RemoteWebViewBrowserClient {
     }
   }
 
+  // "Done with this frame" (drawn or not), so the server can pace the next
+  // one. A lost ack is covered by the next one (acks are cumulative) or by
+  // the server's timeout.
+  private ackFrame(header: FrameInfo): void {
+    if (!(header.flags & FLAG_LAST_OF_FRAME)) {
+      return;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(buildFrameAckPacket(header.frameId));
+    }
+  }
+
   private async processPacket(buffer: ArrayBuffer, gen: number): Promise<void> {
     const view = new DataView(buffer);
     const type = view.getUint8(0);
@@ -251,6 +265,7 @@ export class RemoteWebViewBrowserClient {
       if (parsed.header.encoding !== Encoding.JPEG) {
         this.lastError = `unsupported encoding: ${parsed.header.encoding}`;
         this.pushMetrics("warning");
+        this.ackFrame(parsed.header);
         return;
       }
 
@@ -287,6 +302,7 @@ export class RemoteWebViewBrowserClient {
       if (parsed.header.flags & FLAG_LAST_OF_FRAME) {
         this.frames += 1;
       }
+      this.ackFrame(parsed.header);
       this.lastFrameId = parsed.header.frameId;
       this.pushMetrics("connected");
       return;

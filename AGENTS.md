@@ -88,10 +88,10 @@ RemoteWebViewClient/
   server's `src/protocol.ts` — any change must be made in both repos and
   breaking changes must bump the version on both sides.
 - **Web client** (`web_client/src/protocol.ts` etc.) re-implements most of the
-  protocol in TypeScript: it builds Touch, OpenURL, and Keepalive packets and
-  parses Frame and CurrentURL, but it does **not** send the FrameStats reply,
-  FrameAck or RequestFullFrame the ESP client sends — those can't be tested
-  there. Keep it
+  protocol in TypeScript: it builds Touch, OpenURL, Keepalive, and FrameAck
+  packets and parses Frame and CurrentURL, but it does **not** send the
+  FrameStats reply or RequestFullFrame the ESP client sends — those can't be
+  tested there. Keep it
   in sync too when the protocol changes; it's the fastest way to test protocol
   work without flashing a device.
 
