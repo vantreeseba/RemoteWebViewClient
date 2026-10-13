@@ -42,7 +42,7 @@ RemoteWebViewClient/
 
 - **Config flow**: YAML options are validated in `__init__.py`, applied via
   `set_*` setters, and serialized into the WS connect URI by `build_ws_uri_()`
-  as query params (`id`, `w`, `h`, `r`, `ts`, `fftc`, `ffat`, `ffe`, `enf`,
+  as query params (`id`, `w`, `h`, `r`, `s`, `ts`, `fftc`, `ffat`, `ffe`, `enf`,
   `mfi`, `q`, `mbpm`) — the same param names the server parses (in its
   `config.ts`, except `id`, which the server reads in `src/index.ts`).
   Unset numeric options stay at the `-1` sentinel and are **omitted** from the
@@ -50,16 +50,22 @@ RemoteWebViewClient/
   exception: `rotation_` defaults to `0`, not `-1`, so `r=0` is always sent
   even when `rotation` is absent from the YAML.
 - **Two FreeRTOS tasks** (`remote_webview.cpp`): `rwv_ws` (core 0) drains the
-  outbound packet queue (`q_send_`: touch, frame stats), sends a keepalive
-  every 60s, restarts the client promptly when the server closes cleanly
+  outbound packet queue (`q_send_`: touch, frame ack, frame stats, OpenURL;
+  producers wake it with a task notification), sends a keepalive every 60s,
+  requests a full frame while the screen is out of sync (at most every 2s), restarts the client promptly when the server closes cleanly
   (the CLOSED handler sets a flag — never call stop() from the event task),
   and otherwise force-restarts only after 30s of continuous disconnection
   (routine drops are the client library's auto-reconnect);
   `rwv_decode` (core 1) drains `q_decode_` and does all JPEG decoding and
   drawing. The WS event handler reassembles fragmented binary messages into
   buffers recycled through a pre-allocated pool (`q_free_`, PSRAM-first) and
-  queues a `WsMsg`; when the decode queue is full the oldest queued packet is
-  evicted in favor of the newest — the stream must never block.
+  queues a `WsMsg`. When the decode queue (depth 4) is full the handler waits
+  up to 1s — the socket isn't read meanwhile, so TCP backpressure reaches the
+  server — and only then sheds: the oldest queued packet if it belongs to an
+  older frame, otherwise the newest. Every lost message bumps `rx_loss_seq_`
+  (`note_rx_loss_`), and the screen counts as out of sync until a full frame
+  arrives and decodes without loss. After each frame the decode task queues a
+  cumulative FrameAck so the server can pace frames.
 - **Main-loop marshaling**: the decode task never touches ESPHome objects that
   aren't thread-safe. It sets atomics (`frame_update_pending_`,
   `url_publish_pending_` + `pending_url_` under `state_mtx_`), and `loop()`
@@ -70,19 +76,22 @@ RemoteWebViewClient/
   size mismatch, or non-16-aligned width. Everything draws through
   `display_->draw_pixels_at(...)` as RGB565; `big_endian` controls pixel byte
   order (wrong/tinted colors ⇒ flip it).
-- **Touch** (`RemoteWebViewTouchListener`): Down/Move/Up map to Touch packets;
-  Move events are coalesced to 60 Hz (`cfg::coalesce_moves`,
+- **Touch** (`RemoteWebViewTouchListener`): only one (primary) pointer is
+  forwarded — the server handles a single touch point. Down/Move/Up map to
+  Touch packets; Move events are coalesced to 60 Hz (`cfg::coalesce_moves`,
   `cfg::move_rate_hz` in `remote_webview_config.h`).
 - **Binary protocol** (`protocol.h`): little-endian, `kProtocolVersion = 1`,
   packed structs each guarded by a `static_assert` on wire size. Client →
-  server: Touch, Keepalive, FrameStats (reply), OpenURL. Server → client:
+  server: Touch, Keepalive, FrameStats (reply), OpenURL, RequestFullFrame,
+  FrameAck. Server → client:
   Frame (tiled), FrameStats (request), CurrentURL. This file mirrors the
   server's `src/protocol.ts` — any change must be made in both repos and
   breaking changes must bump the version on both sides.
 - **Web client** (`web_client/src/protocol.ts` etc.) re-implements most of the
   protocol in TypeScript: it builds Touch, OpenURL, and Keepalive packets and
-  parses Frame and CurrentURL, but it does **not** send the FrameStats reply
-  the ESP client sends — FrameStats round-trips can't be tested there. Keep it
+  parses Frame and CurrentURL, but it does **not** send the FrameStats reply,
+  FrameAck or RequestFullFrame the ESP client sends — those can't be tested
+  there. Keep it
   in sync too when the protocol changes; it's the fastest way to test protocol
   work without flashing a device.
 
@@ -104,7 +113,9 @@ esphome compile your-device.yaml
 #     components: [ remote_webview ]
 ```
 
-IDF dependencies (`espressif/esp_websocket_client`, the
+IDF dependencies (`espressif/esp_websocket_client` pinned at 1.6.1 — the
+floor for the separate TX lock `__init__.py` enables, and for ESPHome's
+sendspin component from 2026.10 — and the
 `strange-v/jpegdec-esphome` fork of `bitbank2/jpegdec`) are registered from
 `__init__.py` via `esp32.add_idf_component` — device YAMLs no longer need a
 `framework: components:` block, though one still overrides the registered
@@ -150,16 +161,16 @@ and/or exercising the protocol through `web_client`.
 - Heap allocations prefer PSRAM and fall back to internal RAM:
   `heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)` then retry with
   `MALLOC_CAP_8BIT`.
-- Small fixed-size packets (touch, frame stats) go through
-  `queue_ws_packet_` and are sent by the WS task; the remaining direct
-  senders (`ws_send_keepalive_`, `ws_send_open_url_`) guard on null
-  client/mutex and connection state, take `ws_send_mtx_` with a short
-  `pdMS_TO_TICKS` timeout, and return `false` on contention — sends must
+- Small fixed-size packets (touch, frame ack, frame stats) go through
+  `queue_ws_packet_` and OpenURL through `enqueue_out_msg_`; both are sent by
+  the WS task. All actual sends go through `ws_send_bin_`, which guards on
+  null client/mutex and connection state, takes `ws_send_mtx_` with a short
+  `pdMS_TO_TICKS` timeout, and returns `false` on contention — sends must
   never block the decode task or main loop.
 - Compile-time tunables for **new code** go in `remote_webview_config.h`
   under `namespace cfg`, not as magic numbers in the .cpp. The existing .cpp
-  still hardcodes several (task priorities, reconnect/send timeouts, the 5s
-  supervise loop, the OpenURL size cap) — don't launch a refactor over them.
+  still hardcodes several (the WS task priority, send timeouts, the OpenURL
+  size cap) — don't launch a refactor over them.
 - Unset numeric config uses `-1` as the "not set, let the server default"
   sentinel — preserve this for new options so URI building stays consistent.
 

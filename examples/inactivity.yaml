@@ -23,7 +23,7 @@ esp32:
       CONFIG_SPIRAM_RODATA: y
     components:
       - name: "espressif/esp_websocket_client"
-        ref: 1.5.0
+        ref: 1.6.1
       - name: "bitbank2/jpegdec"
         source: https://github.com/strange-v/jpegdec-esphome
 psram:

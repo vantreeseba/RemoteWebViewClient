@@ -187,7 +187,7 @@ async def to_code(config):
     if CORE.is_esp32 and not CORE.using_arduino:
         from esphome.components.esp32 import add_idf_component
 
-        add_idf_component(name="espressif/esp_websocket_client", ref="1.5.0")
+        add_idf_component(name="espressif/esp_websocket_client", ref="1.6.1")
         add_idf_component(
             name="bitbank2/jpegdec",
             repo="https://github.com/strange-v/jpegdec-esphome",
